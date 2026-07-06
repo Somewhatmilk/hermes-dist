@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily ping for Hermes Dist Relay (Oracle reclamation defense)
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=3600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

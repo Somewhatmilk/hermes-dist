@@ -1,0 +1,137 @@
+# ~/.hermes/profiles/default-template/security/denylist.yaml
+# Denylist patterns that trigger script quarantine + forwarding to operator.
+# This file is force-pulled on every `hermes update`. The user CANNOT modify
+# it (chmod 444). Patterns use Python regex syntax.
+#
+# Categories:
+#   script_imports   - Python imports that suggest hermes-internal access
+#   script_calls     - function/method calls that suggest shell exec or exfil
+#   script_strings   - string literals that suggest credential or path access
+#   urls             - URL patterns that should be blocked in web tools
+#   paths            - filesystem paths the user cannot touch
+#
+# The post-skill-create.sh hook runs the script text against this file.
+# Any single match quarantines the script and forwards to the operator.
+
+# ─── Python imports that touch hermes internals ─────────────────────────────
+# Even indirect imports of hermes modules are flagged. The user's install
+# does not need any hermes internal module to function; if a script
+# imports one, it's either confused or hostile.
+script_imports:
+  - "^import hermes"
+  - "^from hermes"
+  - "^import hermes_agent"
+  - "^from hermes_agent"
+  - "^import hermes_cli"
+  - "^from hermes_cli"
+  - "^import _hermes"
+  - "^from _hermes"
+  - "^import hermes_tools"
+  - "^from hermes_tools"
+  - "__import__\(\s*['\"]hermes"
+  - "__import__\(\s*['\"]_hermes"
+
+# ─── Function/method calls: shell exec and exfil vectors ───────────────────
+# These call patterns are the canonical attack surface for scripts.
+script_calls:
+  - "\bos\.system\("
+  - "\bos\.popen\("
+  - "\bsubprocess\.(run|call|check_output|Popen|check_call)\("
+  - "shell\s*=\s*True"
+  - "\beval\("
+  - "\bexec\("
+  - "\bcompile\("
+  - "\b__import__\("
+  - "\bgetattr\(\s*os"
+  - "\bsetattr\("
+  - "\bsocket\.socket\("
+  - "\bsocket\.create_connection\("
+  - "\brequests\.(get|post|put|delete|patch|head|request)\("
+  - "\burllib\.(request|urlopen)\("
+  - "\bhttpx\.(get|post|put|delete|patch|head|request)\("
+  - "\burlopen\("
+  - "\bftplib\."
+  - "\bsmtplib\."
+  - "\bparamiko\."
+
+# ─── String literals: credentials, paths, suspicious endpoints ─────────────
+# These catch credential-theft and path-traversal patterns even if the
+# import/call regexes don't match.
+script_strings:
+  - "OPENROUTER_API_KEY"
+  - "OPENAI_API_KEY"
+  - "ANTHROPIC_API_KEY"
+  - "HERMES_API_KEY"
+  - "HERMES_.*_TOKEN"
+  - "TELEGRAM_BOT_TOKEN"
+  - "DISCORD_BOT_TOKEN"
+  - "API_SERVER_KEY"
+  - "CIVITAI_API_KEY"
+  - "sk-[A-Za-z0-9]{20,}"               # OpenAI key format
+  - "sk-or-[A-Za-z0-9]{20,}"            # OpenRouter key format
+  - "ghp_[A-Za-z0-9]{20,}"              # GitHub PAT format
+  - "xox[bp]-[A-Za-z0-9-]{10,}"         # Slack token format
+  - "~?/\.hermes(/|\\)"              # any path under ~/.hermes
+  - "/etc/(passwd|shadow|hosts)"
+  - "C:\\Windows\\"
+  - "C:\\Program Files"
+  - "\\.\\pipe\\"                 # Windows named pipe
+  - "127\.0\.0\.1"
+  - "192\.168\."
+  - "10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+  - "172\.(1[6-9]|2\d|3[01])\."
+  - "relay\.your-domain"               # operator's relay URL (block in user scripts)
+  - "discord(?:app)?\.com/api/webhooks" # webhook exfil
+  - "pastebin\.com"
+  - "requestbin\.com"
+  - "ngrok\.io"
+  - "ngrok-free\.app"
+  - "pipedream\.net"
+  - "webhook\.site"
+
+# ─── URL denylist: applied by the web tool wrapper ────────────────────────
+# The web tools (web_search, web_extract, browser_navigate) refuse any URL
+# matching these patterns. This blocks the most common exfil destinations
+# and any access to local network resources.
+urls:
+  - "^https?://127\.0\.0\.1"
+  - "^https?://localhost"
+  - "^https?://192\.168\."
+  - "^https?://10\."
+  - "^https?://172\.(1[6-9]|2\d|3[01])\."
+  - "^https?://\[::1\]"
+  - "^https?://0\.0\.0\.0"
+  - "^https?://[^/]*\.local"
+  - "^https?://[^/]*\.internal"
+  - "^file://"
+  - "^ftp://"
+  - "discord(?:app)?\.com/api/webhooks"
+  - "pastebin\.com"
+  - "requestbin\.com"
+  - "ngrok"
+  - "pipedream\.net"
+  - "webhook\.site"
+
+# ─── Path denylist: filesystem paths the user cannot touch ─────────────────
+# The pre-tool.sh hook checks every file tool's path against this list.
+# Any match → reject the call.
+paths:
+  - "~?/\.hermes(/|\\|$)"            # entire hermes home
+  - "~?/\.local(/|\\|$)"
+  - "~?/\.config(/|\\|$)"
+  - "/etc(/|\\|$)"
+  - "/var(/|\\|$)"
+  - "/root(/|\\|$)"
+  - "/boot(/|\\|$)"
+  - "C:\\Windows(/|\\|$)"
+  - "C:\\Program Files"
+  - "C:\\ProgramData"
+  - "C:\\Users\\[^\\]+\\AppData"
+  - "/System(/|\\|$)"                 # macOS system paths
+  - "/Library(/|\\|$)"
+  - "/private(/|\\|$)"
+
+# ─── Allowlist override: these patterns are ALWAYS permitted ───────────────
+# Even if a path matches above, the allowlist wins. The default is empty —
+# the user truly cannot touch any of the denylisted paths.
+allowlist_overrides: []

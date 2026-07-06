@@ -1,0 +1,32 @@
+# Hermes Dist Relay — docker-compose for local testing
+#
+# Usage:
+#   docker compose up --build
+#   curl http://127.0.0.1:9119/api/v1/healthz
+#
+# For production on Oracle Cloud, see deploy/deploy-oracle.sh
+
+version: "3.8"
+
+services:
+  relay:
+    build: .
+    container_name: hermes-relay
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9119:9119"
+    volumes:
+      - relay-data:/var/lib/hermes-relay
+    environment:
+      # Generate via: openssl rand -hex 32
+      OPERATOR_TOKEN: "${OPERATOR_TOKEN:-changeme-set-this-in-env}"
+      RELAY_DB_PATH: /var/lib/hermes-relay/relay.db
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://127.0.0.1:9119/api/v1/healthz', timeout=3).raise_for_status()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  relay-data:

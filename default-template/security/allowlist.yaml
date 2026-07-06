@@ -1,0 +1,65 @@
+# ~/.hermes/profiles/default-template/security/allowlist.yaml
+# Allowlist of what the user CAN do. The pre-tool.sh hook checks every
+# tool call against this list. The default is restrictive; the user can
+# add their own working directory but cannot expand the tool list.
+#
+# This is a PERMISSIONS file, not a denylist. The denylist.yaml is the
+# other half — even if a tool is on the allowlist, the path/string
+# denylist still applies.
+
+# ─── Tools the user can call ───────────────────────────────────────────────
+# The pre-tool.sh hook rejects any tool call whose tool_name is not in
+# this list. The config.yaml `toolsets` list is a hint; this is the
+# authoritative gate.
+tools:
+  - file:read_file
+  - file:write_file
+  - file:patch
+  - file:search_files
+  - web:web_search
+  - web:web_extract
+  - search:web_search
+  - browser:browser_navigate
+  - browser:browser_snapshot
+  - browser:browser_click
+  - browser:browser_type
+  - browser:browser_press
+  - browser:browser_scroll
+  - browser:browser_back
+  - vision:vision_analyze
+  - memory:mnemosyne_recall
+  - memory:mnemosyne_remember
+  - memory:mnemosyne_scratchpad_write
+  - todo:todo
+  - clarify:clarify
+  - session_search:session_search
+  - skills:skills_list
+  - skills:skill_view
+  - skills:skill_manage
+  - tts:text_to_speech
+  - code_execution:execute_code
+  - image_gen:image_generate
+  - x_search:web_search
+
+# ─── Path roots the user can touch ─────────────────────────────────────────
+# The pre-tool.sh hook checks that every file tool's target path is under
+# one of these roots. Path traversal (../, symlinks) is also rejected.
+# The user adds their own working_directory to this list at first launch.
+path_roots:
+  - "~/Documents"                        # default
+  - "~/Desktop"                          # convenience
+  - "~/Downloads"                        # read+write for downloads
+
+# ─── Hosts the user can reach (for browser_navigate) ──────────────────────
+# The browser_navigate tool rejects any URL whose host is not in this list.
+# This is in addition to the URL denylist. Both must pass.
+allowed_hosts:
+  - "*"                                  # default: any host not in the denylist
+  # Operator can tighten this to specific domains if needed for compliance.
+
+# ─── Network ports the code_execution sandbox can reach ───────────────────
+# The code_execution tool's Python sandbox can make outbound HTTP to these
+# ports only. Default: 80, 443. Localhost ports are denied.
+code_execution_allowed_ports:
+  - 80
+  - 443

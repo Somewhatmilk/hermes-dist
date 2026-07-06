@@ -1,0 +1,10 @@
+# ~/.hermes/profiles/default-template/profile.yaml
+# This is the profile descriptor for the user-facing default profile.
+# It is read by `hermes profile list` and by the dispatcher when routing work.
+# On first launch (.onboard.sh), this profile is renamed to the user's UUID
+# (e.g. profile "default-template" → profile "f47ac10b-58cc-4372-a567-0e02b2c3d479").
+# Renaming ensures no two users can accidentally collide on a shared "default" name.
+
+name: default-template
+description: "User-facing Hermes Agent. Restricted toolset (no terminal, no delegation, no cron). Single profile — does not spawn subagents. Skills the user creates are quarantined for operator review. Memories marked submit_to_collector: true are forwarded to the relay. This profile has no access to adversary, reviewer, or any other internal-only profile."
+description_auto: false

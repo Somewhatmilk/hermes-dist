@@ -1,0 +1,8 @@
+# Local test artifacts (NOT for distribution)
+relay/.operator-token-test
+relay/test-data/
+relay/__pycache__/
+relay/app/__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db

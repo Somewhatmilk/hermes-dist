@@ -1,0 +1,117 @@
+# ~/.hermes/profiles/default-template/config.yaml
+# User-facing default profile config. This is the OVERLAY applied on top of
+# ~/.hermes/config.yaml at profile launch. The operator's global config is
+# NOT inherited — only the keys in the canonical PROFILE_OVERRIDE_KEYS set
+# (model, providers, fallback_model, fallback_providers,
+# credential_pool_strategies, toolsets) merge with global.
+#
+# This bundle is shipped as part of the hermes-dist distribution. End users
+# receive this file at install time. They CANNOT modify it (chmod 444 at
+# install). Per-user customizations live in profiles/<user_uuid>/config.yaml.
+
+# ─── Toolset restriction ────────────────────────────────────────────────────
+# This is the SINGLE source of truth for what tools the user can call.
+# The `terminal` toolset is intentionally NOT here. The user has no shell.
+# The `delegation`, `cronjob`, `kanban` toolsets are not here. The user
+# cannot spawn subagents, schedule tasks, or coordinate a swarm.
+# `mcp` is not here. The user cannot install new MCP servers.
+#
+# If a tool call arrives that is not in this list, the pre-tool.sh hook
+# rejects it at the shell layer — config-layer enforcement is bypassable
+# by a successful prompt-injection; shell-layer is not.
+toolsets:
+  - file
+  - web
+  - search
+  - browser
+  - vision
+  - memory
+  - todo
+  - clarify
+  - session_search
+  - skills
+  - tts
+  - code_execution
+  - image_gen
+  - x_search
+
+# ─── Model: user-supplied, NOT operator-supplied ───────────────────────────
+# The user picks their own provider and pays with their own key. The operator
+# does NOT pay for user inference, and operator keys never enter this file.
+# This block is filled in by .onboard.sh from user prompts.
+model:
+  default: "openai/gpt-4o-mini"          # example — overridden at first launch
+  provider: openai
+  # api_key intentionally NOT in this file. It lives in the per-user .env
+  # which the user populates from their own provider dashboard.
+
+# ─── Web search: user-supplied ─────────────────────────────────────────────
+# Same pattern. User picks a search provider, uses their own key.
+web:
+  search_provider: tavily
+  # search_api_key intentionally NOT here. In user's .env.
+
+# ─── Mnemosyne: opt-in only, push-only to operator relay ───────────────────
+# sync.enabled starts as false. The .onboard.sh script prompts the user
+# explicitly. If they refuse, sync.enabled stays false and NO data leaves
+# the box. If they accept, sync.enabled becomes true and the auth_token
+# below is populated with a per-user HMAC secret.
+#
+# Crucially: pull_on_session_start is ALWAYS false. The user never
+# receives operator data. The only direction is push.
+memory:
+  provider: mnemosyne
+  mnemosyne:
+    sync:
+      enabled: false
+      remote: ""                         # populated by .onboard.sh
+      device_id: ""                      # populated by .onboard.sh
+      auth_token: ""                     # populated by .onboard.sh
+      push_on_session_end: true
+      push_interval_minutes: 30
+      pull_on_session_start: false
+
+# ─── Working directory: user-chosen ────────────────────────────────────────
+# Default is the user's Documents folder. The pre-tool.sh hook enforces
+# that file tools can only touch paths under this directory.
+# Anything outside (including ~/.hermes itself) is denied at the shell layer.
+working_directory: "~/Documents"
+
+# ─── Security: hook paths and denylist ─────────────────────────────────────
+# These three hook scripts run at the shell layer on every relevant event.
+# The user CANNOT disable them — they are owned by the operator (chmod 555)
+# and re-pulled on every update.
+security:
+  hooks:
+    pre_tool: "~/.hermes/profiles/default-template/hooks/pre-tool.sh"
+    post_skill_create: "~/.hermes/profiles/default-template/hooks/post-skill-create.sh"
+    post_memory_save: "~/.hermes/profiles/default-template/hooks/post-memory-save.sh"
+  denylist_path: "~/.hermes/profiles/default-template/security/denylist.yaml"
+  allowlist_path: "~/.hermes/profiles/default-template/security/allowlist.yaml"
+  force_pull_on_launch: true             # security files always re-fetched
+
+# ─── MCP servers: local-only ───────────────────────────────────────────────
+# The tinysearch scraper is the only MCP the user gets. It runs in a local
+# Docker container bound to 127.0.0.1. The user cannot reach the operator's
+# internal services because tinysearch's allowlist (separate from the
+# hermes-dist allowlist) does not include the relay or any 10.x/192.168.x
+# range.
+mcp_servers:
+  tinysearch:
+    transport: http
+    url: "http://127.0.0.1:8000/mcp"
+    start_command: "docker run -d --name hermes-tinysearch -p 127.0.0.1:8000:8000 --restart unless-stopped hermes/tinysearch:latest"
+    stop_command: "docker rm -f hermes-tinysearch"
+    # If Docker is not available, fall back to direct HTTP scrape (slower).
+    fallback_transport: direct_http
+
+# ─── Update channel ───────────────────────────────────────────────────────
+# Where `hermes update` looks for new versions. The user runs `hermes update`
+# manually. The system-level scheduled task (Windows Task Scheduler /
+# launchd / systemd) does a daily `git pull` to surface available updates
+# to the user, but does NOT auto-install.
+update:
+  channel: ""                            # populated by .onboard.sh
+  tag_pattern: "v*"
+  auto_install: false                    # user always confirms
+  silent_security_patches: true          # denylist + hook scripts force-pulled
