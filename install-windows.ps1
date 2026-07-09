@@ -184,7 +184,7 @@ if (-not $NoHeartbeat) {
             Write-Warn "Failed to register heartbeat task: $_"
         }
     } else {
-        Write-Warn "heartbeat.sh not found in $DIST_DIR\install-common\ — push updates disabled"
+        Write-Warn "heartbeat.sh not found in $DIST_DIR\install-common\ - push updates disabled"
     }
 }
 
@@ -192,8 +192,8 @@ if (-not $NoHeartbeat) {
 if (-not $NoScheduledTasks) {
     $taskName = "HermesDistDailyUpdate"
     $action = New-ScheduledTaskAction `
-        -Execute $bash `
-        -Argument "-c `"cd '$DIST_DIR' && git pull --ff-only 2>&1 | head -20`""
+            -Execute $bash `
+            -Argument "-c `"cd '$DIST_DIR'; git pull --ff-only 2>&1 | head -20`""
     $trigger = New-ScheduledTaskTrigger -Daily -At "09:00"
     $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Limited
 

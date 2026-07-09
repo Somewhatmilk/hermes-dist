@@ -23,7 +23,8 @@ source "$SCRIPT_DIR/install-common/common.sh"
 
 # ── macOS detection + privilege model ───────────────────────────────────
 is_root() { [ "$(id -u)" -eq 0 ]; }
-sudo() {
+# NOTE: do not name this `sudo` — would shadow the binary and recurse forever.
+run_priv() {
     if is_root; then
         "$@"
     else
@@ -75,7 +76,7 @@ add_startup_task() {
     local interval="${1:-30}"; shift || true
     local extra_args=("$@")
 
-    local label="com.somew.hermes-dist.${task_name,,}"
+    local label="com.somew.hermes-dist.$(printf '%s' "$task_name" | tr '[:upper:]' '[:lower:]')"
     local plist_dir="$HOME/Library/LaunchAgents"
     local plist_file="$plist_dir/$label.plist"
 

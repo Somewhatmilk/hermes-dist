@@ -16,7 +16,7 @@
 #   log_error  <msg>
 #   die        <msg>        # log_error + exit 1
 #   run        <cmd>        # execute a command, return its stdout
-#   sudo       <cmd>        # run a command with root (no-op if already root)
+#   run_priv   <cmd>        # run a command with root (no-op if already root)
 #   have_cmd   <name>       # return 0 if command exists, 1 otherwise
 #   install_pkg <name>      # OS-native package install (apt/brew/dnf/pacman)
 #   user_config_dir         # XDG_CONFIG_HOME or OS equivalent

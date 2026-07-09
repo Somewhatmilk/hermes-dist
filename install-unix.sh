@@ -35,7 +35,8 @@ detect_distro() {
 }
 
 is_root() { [ "$(id -u)" -eq 0 ]; }
-sudo() {
+# NOTE: do not name this `sudo` — would shadow the binary and recurse forever.
+run_priv() {
     if is_root; then
         "$@"
     else
@@ -50,13 +51,13 @@ have_cmd() { command -v "$1" >/dev/null 2>&1; }
 install_pkg() {
     case "$DISTRO_FAMILY" in
         *debian*|*ubuntu*)
-            sudo apt-get update -qq && sudo apt-get install -y -qq "$@" ;;
+            run_priv apt-get update -qq && run_priv apt-get install -y -qq "$@" ;;
         *fedora*|*rhel*|*centos*)
-            sudo dnf install -y "$@" ;;
+            run_priv dnf install -y "$@" ;;
         *arch*)
-            sudo pacman -Sy --noconfirm "$@" ;;
+            run_priv pacman -Sy --noconfirm "$@" ;;
         *alpine*)
-            sudo apk add --no-cache "$@" ;;
+            run_priv apk add --no-cache "$@" ;;
         *)
             log_warn "Unknown distro family '$DISTRO_FAMILY'. Please install '$*' manually."
             return 1 ;;
