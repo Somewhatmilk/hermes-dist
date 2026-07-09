@@ -1,0 +1,238 @@
+# End-to-end relay test: stand up the relay, run a simulated user,
+# verify HMAC roundtrip, manifest push, scrape routing, peer share/recall.
+# Runs on every PR + push + weekly.
+#
+# This is the most important workflow — it exercises the full chain
+# without needing real users.
+
+name: relay-e2e
+
+on:
+  push:
+    branches: [master, feature/**]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 7 * * 0"  # weekly, after the install-smoke
+
+jobs:
+  e2e:
+    name: Relay + simulated user
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    services:
+      relay:
+        image: python:3.11-slim
+        # Bind to localhost — tests use 127.0.0.1
+        ports:
+          - 9119:9119
+        env:
+          OPERATOR_TOKEN: "test-operator-token-64-hex-chars-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          RELAY_DB_PATH: /data/relay.db
+          SCRAPER_DB_PATH: /data/scraper.db
+          PEER_DB_PATH: /data/peer.db
+          SCRAPER_SLOT_ROOT: /data/scraper-slots
+          PYTHONUNBUFFERED: "1"
+        volumes:
+          - relay-data:/data
+        options: >-
+          --health-cmd "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:9119/api/v1/healthz\")'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        steps:
+          - name: Install relay deps
+            run: |
+              apt-get update -qq && apt-get install -y -qq git >/dev/null
+              pip install --quiet fastapi uvicorn pydantic
+
+          - name: Checkout repo
+            uses: actions/checkout@v4
+
+          - name: Start relay
+            run: |
+              cd relay
+              python -m uvicorn app.main:app --host 0.0.0.0 --port 9119 &
+              RELAY_PID=$!
+              echo "RELAY_PID=$RELAY_PID" >> $GITHUB_ENV
+              # Wait for health
+              for i in {1..30}; do
+                if curl -fsS http://localhost:9119/api/v1/healthz >/dev/null 2>&1; then
+                  echo "relay healthy after ${i}s"
+                  break
+                fi
+                sleep 1
+              done
+              curl -fsS http://localhost:9119/api/v1/healthz | head -1
+
+          - name: Register simulated user
+            run: |
+              USER_UUID=$(python -c "import uuid; print(uuid.uuid4())")
+              echo "USER_UUID=$USER_UUID" >> $GITHUB_ENV
+              curl -fsS -X POST http://localhost:9119/api/v1/register \
+                -H "Content-Type: application/json" \
+                -d "{\"uuid\":\"$USER_UUID\",\"os\":\"linux\",\"version\":\"0.4.2\",\"opted_in\":true,\"registered_at\":\"2026-07-09T00:00:00Z\"}" \
+                | python -m json.tool
+              # Extract secret from output
+              SECRET=$(curl -fsS -X POST http://localhost:9119/api/v1/register \
+                -H "Content-Type: application/json" \
+                -d "{\"uuid\":\"$USER_UUID\",\"os\":\"linux\",\"version\":\"0.4.2\",\"opted_in\":true,\"registered_at\":\"2026-07-09T00:00:00Z\"}")
+              # Actually, registration is idempotent — first call returns secret.
+              # We need to capture it from the first response.
+
+          - name: "Test: HMAC-signed manifest fetch"
+            run: |
+              python <<'PYEOF'
+              import hmac, hashlib, base64, time, secrets, urllib.request, json
+
+              USER_UUID = "11111111-2222-3333-4444-555555555555"
+              # Register to get a real secret
+              req = urllib.request.Request(
+                  "http://localhost:9119/api/v1/register",
+                  data=json.dumps({"uuid": USER_UUID, "os": "linux",
+                                    "version": "0.4.2", "opted_in": True,
+                                    "registered_at": "2026-07-09T00:00:00Z"}).encode(),
+                  headers={"Content-Type": "application/json"})
+              resp = json.loads(urllib.request.urlopen(req).read())
+              SECRET = resp["hmac_secret"]
+              assert SECRET and len(SECRET) == 64
+              print("✓ registered, got 64-char secret")
+
+              # Sign a manifest fetch
+              ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+              nonce = secrets.token_hex(16)
+              body = b""
+              canonical = f"{USER_UUID}\n{ts}\n{nonce}\nmanifest_query\n".encode() + body
+              sig = base64.b64encode(hmac.new(SECRET.encode(), canonical, hashlib.sha256).digest()).decode()
+              req = urllib.request.Request(
+                  f"http://localhost:9119/api/v1/manifest?uuid={USER_UUID}",
+                  headers={
+                      "X-Hermes-User": USER_UUID,
+                      "X-Hermes-Timestamp": ts,
+                      "X-Hermes-Nonce": nonce,
+                      "X-Hermes-Signature": sig,
+                      "X-Hermes-Event-Type": "manifest_query",
+                  })
+              resp = json.loads(urllib.request.urlopen(req).read())
+              print(f"✓ manifest fetch: {resp}")
+              assert resp["ok"] is True
+
+              # Operator publishes a release
+              req = urllib.request.Request(
+                  "http://localhost:9119/api/v1/release",
+                  data=json.dumps({
+                      "soul_md_version": "v1",
+                      "config_yaml_version": "v1",
+                      "hermes_version": "0.4.2",
+                      "soul_md": "# Test SOUL.md\n",
+                      "config_yaml": "model:\n  default: test\n",
+                      "rollout_pct": 100,
+                      "message": "test release",
+                  }).encode(),
+                  headers={
+                      "Content-Type": "application/json",
+                      "X-Operator-Token": "test-operator-token-64-hex-chars-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  })
+              resp = json.loads(urllib.request.urlopen(req).read())
+              print(f"✓ release published: {resp}")
+
+              # User fetches again — should now get the bundle
+              ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+              nonce = secrets.token_hex(16)
+              canonical = f"{USER_UUID}\n{ts}\n{nonce}\nmanifest_query\n".encode()
+              sig = base64.b64encode(hmac.new(SECRET.encode(), canonical, hashlib.sha256).digest()).decode()
+              req = urllib.request.Request(
+                  f"http://localhost:9119/api/v1/manifest?uuid={USER_UUID}",
+                  headers={
+                      "X-Hermes-User": USER_UUID,
+                      "X-Hermes-Timestamp": ts,
+                      "X-Hermes-Nonce": nonce,
+                      "X-Hermes-Signature": sig,
+                      "X-Hermes-Event-Type": "manifest_query",
+                  })
+              resp = json.loads(urllib.request.urlopen(req).read())
+              print(f"✓ manifest after publish: soul_md_version={resp.get('soul_md_version')}, "
+                    f"soul_md_len={len(resp.get('soul_md',''))}")
+              assert resp["soul_md_version"] == "v1"
+              assert "Test SOUL.md" in resp["soul_md"]
+
+              # Peer share (owner side)
+              ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+              nonce = secrets.token_hex(16)
+              peer_body = json.dumps({
+                  "memory_id": "mem-1",
+                  "preview": "Friend thought: this is a test",
+                  "source": "internal",
+                  "persona_id": "R-friend-main",
+                  "tags": ["test"],
+                  "reliability": "curated",
+                  "origin_kind": "peer_relay",
+              }).encode()
+              canonical = f"{USER_UUID}\n{ts}\n{nonce}\npeer_share\n".encode() + peer_body
+              sig = base64.b64encode(hmac.new(SECRET.encode(), canonical, hashlib.sha256).digest()).decode()
+              req = urllib.request.Request(
+                  "http://localhost:9119/api/v1/peer/share",
+                  data=peer_body,
+                  headers={
+                      "Content-Type": "application/json",
+                      "X-Hermes-User": USER_UUID,
+                      "X-Hermes-Timestamp": ts,
+                      "X-Hermes-Nonce": nonce,
+                      "X-Hermes-Signature": sig,
+                      "X-Hermes-Event-Type": "peer_share",
+                  })
+              resp = json.loads(urllib.request.urlopen(req).read())
+              print(f"✓ peer share: {resp}")
+
+              # Peer recall (any user)
+              ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+              nonce = secrets.token_hex(16)
+              canonical = f"{USER_UUID}\n{ts}\n{nonce}\npeer_recall\n".encode()
+              sig = base64.b64encode(hmac.new(SECRET.encode(), canonical, hashlib.sha256).digest()).decode()
+              req = urllib.request.Request(
+                  "http://localhost:9119/api/v1/peer/recall",
+                  headers={
+                      "X-Hermes-User": USER_UUID,
+                      "X-Hermes-Timestamp": ts,
+                      "X-Hermes-Nonce": nonce,
+                      "X-Hermes-Signature": sig,
+                      "X-Hermes-Event-Type": "peer_recall",
+                  })
+              resp = json.loads(urllib.request.urlopen(req).read())
+              print(f"✓ peer recall: {resp['count']} items")
+              assert resp["count"] == 1
+              assert resp["items"][0]["preview"] == "Friend thought: this is a test"
+              assert resp["items"][0]["_preview_only"] is True
+              # Verify privacy: no full_content in the response
+              assert "full_content" not in resp["items"][0]
+              print("✓ privacy boundary: no full_content in peer response")
+
+              # Scrape submit
+              ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+              nonce = secrets.token_hex(16)
+              scrape_body = json.dumps({
+                  "target_url": "https://example.com",
+                  "persona_id": "R-you-prod",
+                  "method": "GET",
+              }).encode()
+              canonical = f"{USER_UUID}\n{ts}\n{nonce}\nscrape_submit\n".encode() + scrape_body
+              sig = base64.b64encode(hmac.new(SECRET.encode(), canonical, hashlib.sha256).digest()).decode()
+              req = urllib.request.Request(
+                  "http://localhost:9119/api/v1/scrape",
+                  data=scrape_body,
+                  headers={
+                      "Content-Type": "application/json",
+                      "X-Hermes-User": USER_UUID,
+                      "X-Hermes-Timestamp": ts,
+                      "X-Hermes-Nonce": nonce,
+                      "X-Hermes-Signature": sig,
+                      "X-Hermes-Event-Type": "scrape_submit",
+                  })
+              resp = json.loads(urllib.request.urlopen(req).read())
+              print(f"✓ scrape submit: {resp}")
+              assert resp["slot_id"].startswith("u_") and "__p_R-you-prod" in resp["slot_id"]
+
+              print()
+              print("ALL E2E TESTS PASS")
+              PYEOF
