@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installerDefaultLocale.schema.json
+PackageIdentifier: Somewhatmilk.hermes-dist
+PackageVersion: 0.2.0
+PackageLocale: en-US
+Publisher: Somewhatmilk
+PackageName: Hermes Dist
+License: MIT
+ShortDescription: Self-hosted Hermes Agent with operator-controlled updates
+Description: |-
+  Hermes Dist is the multi-user distribution bundle for Hermes Agent, the
+  autonomous AI coding and task-execution agent by Nous Research. This package
+  installs a hardened, operator-managed Hermes instance on your machine that
+  receives profile bundles, security patches, and tool updates from a relay
+  you (or your operator) control. No data leaves your machine unless you opt
+  in at first launch.
+Moniker: hermes-dist
+Tags:
+  - ai
+  - agent
+  - hermes
+  - commandline
+  - llm
+  - nous-research
+PurchaseUrl: https://github.com/Somewhatmilk/hermes-dist
+ManifestType: defaultLocale

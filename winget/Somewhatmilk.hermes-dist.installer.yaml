@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.0.1.schema.json
+PackageIdentifier: Somewhatmilk.hermes-dist
+PackageVersion: 0.2.0
+InstallerType: script
+Commands:
+  - Language: en-US
+    Command: powershell
+    Arguments: '"-NoProfile","-ExecutionPolicy","Bypass","-Command","irm https://raw.githubusercontent.com/Somewhatmilk/hermes-dist/master/install-windows.ps1 | iex"'
+    PackageLocale: en-US
+ManifestType: installer
