@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Events — hermes-dist</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; background:#0e1116; color:#c9d1d9; max-width: 1200px; margin: 0 auto; padding: 24px; }
+  h1 { color:#fff; font-size: 1.6rem; }
+  nav { margin-bottom: 32px; }
+  nav a { color:#58a6ff; text-decoration:none; margin-right: 16px; }
+  nav a.active { color:#fff; font-weight:600; }
+  table { width:100%; border-collapse: collapse; background:#161b22; border:1px solid #30363d; border-radius:6px; overflow:hidden; }
+  th { background:#0d1117; text-align: left; padding: 12px; font-size:0.85rem; color:#8b949e; text-transform:uppercase; }
+  td { padding: 10px 12px; border-top:1px solid #21262d; font-size:0.85rem; vertical-align: top; }
+  td.mono { font-family: ui-monospace, monospace; }
+  pre { background:#0d1117; padding:8px; border-radius:4px; max-height: 200px; overflow:auto; font-size:0.75rem; color:#8b949e; }
+  .empty { color:#8b949e; padding:32px; text-align:center; }
+</style>
+</head>
+<body>
+<h1>Recent events</h1>
+<nav>
+  <a href="/dashboard/">Overview</a>
+  <a href="/dashboard/installed">Installed</a>
+  <a href="/dashboard/events" class="active">Events</a>
+  <a href="/dashboard/audit">Audit</a>
+  <a href="/dashboard/scrape">Scrape pool</a>
+  <a href="/dashboard/peer">Peer index</a>
+  <a href="/dashboard/release">Release</a>
+  <a href="/dashboard/logout">Logout</a>
+</nav>
+
+{% if events %}
+<table>
+<thead><tr><th>ID</th><th>User</th><th>Type</th><th>Received</th><th>Size</th><th>Sig</th><th>Payload</th></tr></thead>
+<tbody>
+{% for e in events %}
+<tr>
+  <td class="mono">{{ e.id }}</td>
+  <td class="mono">{{ (e.uuid or '')[:8] }}…</td>
+  <td>{{ e.event_type }}</td>
+  <td>{{ e.received_at }}</td>
+  <td>{{ e.payload_size }}b</td>
+  <td>{{ '✓' if e.signature_valid else '✗' }}</td>
+  <td><pre>{{ (e.payload[:300] if e.payload else '') | tojson }}</pre></td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% else %}
+<div class="empty">No events yet.</div>
+{% endif %}
+
+</body>
+</html>

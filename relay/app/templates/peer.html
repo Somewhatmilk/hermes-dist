@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Peer index — hermes-dist</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; background:#0e1116; color:#c9d1d9; max-width: 1100px; margin: 0 auto; padding: 24px; }
+  h1 { color:#fff; font-size: 1.6rem; }
+  nav { margin-bottom: 32px; }
+  nav a { color:#58a6ff; text-decoration:none; margin-right: 16px; }
+  nav a.active { color:#fff; font-weight:600; }
+  .row { background:#161b22; padding:16px; border-radius:6px; margin-bottom:12px; border:1px solid #30363d; }
+  .row .meta { color:#8b949e; font-size: 0.8rem; margin-bottom:8px; font-family: ui-monospace, monospace; }
+  .row .preview { background:#0d1117; padding:12px; border-radius:4px; font-size:0.9rem; white-space: pre-wrap; }
+  .tags { display:inline-block; background:#1f6feb33; color:#79c0ff; padding:2px 8px; border-radius:12px; font-size:0.75rem; margin-right:6px; }
+  .empty { color:#8b949e; padding:32px; text-align:center; }
+  .boundary { background:#da363322; color:#ffa198; padding:8px 12px; border-radius:6px; margin-bottom:24px; font-size:0.85rem; border:1px solid #f8514944; }
+</style>
+</head>
+<body>
+<h1>Peer index</h1>
+<nav>
+  <a href="/dashboard/">Overview</a>
+  <a href="/dashboard/installed">Installed</a>
+  <a href="/dashboard/events">Events</a>
+  <a href="/dashboard/audit">Audit</a>
+  <a href="/dashboard/scrape">Scrape pool</a>
+  <a href="/dashboard/peer" class="active">Peer index</a>
+  <a href="/dashboard/release">Release</a>
+  <a href="/dashboard/logout">Logout</a>
+</nav>
+
+<div class="boundary">
+  Privacy boundary: this index holds PREVIEWS ONLY (≤280 chars). Full memory content
+  lives only in the originating user's Mnemosyne DB on their machine. The relay cannot
+  mirror full content — by schema, by writer discipline, by review.
+</div>
+
+{% if items %}
+{% for i in items %}
+<div class="row">
+  <div class="meta">
+    {{ i.created_at }} ·
+    owner={{ i.owner_user_uuid[:8] }}…{% if i.owner_persona %} · persona={{ i.owner_persona }}{% endif %} ·
+    source={{ i.source }} · reliability={{ i.reliability }} · origin={{ i.origin_kind }}
+    {% if i.recall_count %} · recalled {{ i.recall_count }}×{% endif %}
+  </div>
+  {% if i.tags %}<div style="margin-bottom:8px">{% for t in i.tags %}<span class="tags">{{ t }}</span>{% endfor %}</div>{% endif %}
+  <div class="preview">{{ i.preview }}</div>
+</div>
+{% endfor %}
+{% else %}
+<div class="empty">No peer previews shared yet.</div>
+{% endif %}
+
+</body>
+</html>

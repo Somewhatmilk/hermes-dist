@@ -44,6 +44,7 @@ from pathlib import Path
 MAX_PREVIEW_CHARS = 280
 
 
+@contextmanager
 def get_conn(db_path: Path):
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path), isolation_level=None)
@@ -173,8 +174,19 @@ def recall_previews(
     where.append("shared_with_group = 1")
     where_clause = " AND ".join(where) if where else "1=1"
 
+    # Increment recall counters FIRST so the returned rows reflect post-increment
+    # values (so a row's recall_count means "times this row has been recalled,
+    # including the call that just returned it").
+    if where_clause != "1=1" or True:
+        # We always increment on a recall; counts are useful audit info
+        # even for the unfiltered "give me everything" view.
+        pass
+
+    # Always run the SELECT first; we need the matching memory_ids to know
+    # which rows to increment.
     sql = f"""SELECT memory_id, owner_user_uuid, owner_persona, preview,
-                     tags, created_at, reliability, origin_kind, source
+                     tags, created_at, reliability, origin_kind, source,
+                     recall_count, last_recalled_at
               FROM peer_memory_index
               WHERE {where_clause}
               ORDER BY created_at DESC
@@ -183,6 +195,27 @@ def recall_previews(
 
     with get_conn(db_path) as conn:
         rows = conn.execute(sql, params).fetchall()
+
+    if rows:
+        ids = [r[0] for r in rows]
+        placeholders = ",".join("?" for _ in ids)
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with get_conn(db_path) as conn:
+            conn.execute(
+                f"""UPDATE peer_memory_index
+                    SET recall_count = recall_count + 1,
+                        last_recalled_at = ?
+                    WHERE memory_id IN ({placeholders})""",
+                [now, *ids],
+            )
+        # Bump recall_count in the returned rows so callers see the
+        # post-increment value (matches "this call counts as a recall").
+        rows = [
+            (r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8],
+             (r[9] + 1) if r[9] is not None else 1,
+             now if r[10] is None else r[10])
+            for r in rows
+        ]
 
     out = []
     for r in rows:
@@ -196,23 +229,11 @@ def recall_previews(
             "reliability": r[6],
             "origin_kind": r[7],
             "source": r[8],
+            "recall_count": r[9] if len(r) > 9 else 0,
+            "last_recalled_at": r[10] if len(r) > 10 else None,
             # Exposes the privacy boundary explicitly: this is preview only.
             "_preview_only": True,
         })
-
-    # Increment recall counters (operator-visible audit)
-    if out:
-        ids = [r["memory_id"] for r in out]
-        placeholders = ",".join("?" for _ in ids)
-        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        with get_conn(db_path) as conn:
-            conn.execute(
-                f"""UPDATE peer_memory_index
-                    SET recall_count = recall_count + 1,
-                        last_recalled_at = ?
-                    WHERE memory_id IN ({placeholders})""",
-                [now, *ids],
-            )
 
     return out
 

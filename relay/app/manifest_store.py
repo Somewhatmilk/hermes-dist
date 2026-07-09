@@ -37,6 +37,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 
+@contextmanager
 def get_conn(db_path: Path):
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path), isolation_level=None)

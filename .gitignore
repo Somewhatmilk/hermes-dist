@@ -3,6 +3,78 @@ relay/.operator-token-test
 relay/test-data/
 relay/__pycache__/
 relay/app/__pycache__/
+default-template/scripts/__pycache__/
 *.pyc
+
+# OS junk
 .DS_Store
 Thumbs.db
+
+# ─── Privacy boundary: NEVER commit operator-private content ─────────────
+#
+# The hermes-dist repo is PUBLIC (or at least visible to all your users).
+# The boundary is:
+#
+#   IN this repo (workflow / structure / config)        OUT of this repo
+#   ──────────────────────────────────────────         ──────────────────
+#   default-template/  (the user-facing bundle)        ~/.hermes/ (operator's own hermes)
+#   relay/              (collector code)                ~/.hermes/mnemosyne/data/ (private memories)
+#   docs/                                               ~/research/ (operator's research notes)
+#   install-common/                                    ~/.hermes-dist-operator.env (operator tokens)
+#   winget/                                            ~/.hermes-dist-keys/ (private keys)
+#                                                       ~/hermes-dist-private/ (your dev branch)
+#
+# Rule of thumb: if it's "how the system works" → in this repo.
+#                if it's "what I've done / found / remembered" → out.
+
+# Operator's own hermes install
+/.hermes/
+/hermes-home/
+
+# Mnemosyne private database
+**/mnemosyne/data/
+**/mnemosyne/data/*.db
+**/mnemosyne/data/*.sqlite*
+
+# Operator secrets / env files
+.env
+.env.local
+*.env.local
+.hermes-dist-operator.env
+.hermes-dist-keys/
+/keys/
+/private-keys/
+*.pem
+*.key
+
+# Operator's research / notes
+/research-private/
+/scratch/
+/operator-notes/
+
+# Scraped data (operator's own scrape results, NOT user-shared)
+scrape-results-private/
+scrape-cache/
+
+# Staging / dev branches
+/dev/
+/scratch-*/
+/tmp/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build / test artifacts
+/dist/
+/build/
+/*.egg-info/
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Logs
+*.log
+logs/

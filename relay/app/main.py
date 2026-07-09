@@ -37,6 +37,7 @@ from . import manifest_store
 from . import scraper_jobs
 from . import peer_index
 from .scraper_router import ScraperPool
+from . import dashboard as dashboard_router
 from .hmac_auth import verify_hmac_request
 
 
@@ -637,3 +638,8 @@ def peer_list(limit: int = 100):
     """Operator dashboard: what has been shared across the group."""
     items = peer_index.recall_previews(limit=min(limit, 500), db_path=PEER_DB_PATH)
     return {"ok": True, "count": len(items), "items": items}
+
+
+# ─── Mount dashboard router ──────────────────────────────────────────────
+
+app.include_router(dashboard_router.router)

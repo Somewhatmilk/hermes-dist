@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hermes-dist — Operator Login</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; background:#0e1116; color:#c9d1d9; max-width: 480px; margin: 80px auto; padding: 0 24px; }
+  h1 { font-size: 1.5rem; color:#fff; }
+  form { background:#161b22; padding:24px; border-radius:8px; border:1px solid #30363d; }
+  input[type=text] { width:100%; padding:10px; background:#0d1117; color:#c9d1d9; border:1px solid #30363d; border-radius:6px; font-family: ui-monospace, monospace; font-size:0.85rem; }
+  button { margin-top:16px; padding:8px 16px; background:#238636; color:#fff; border:none; border-radius:6px; cursor:pointer; }
+  button:hover { background:#2ea043; }
+  .err { color:#f85149; margin-top:12px; }
+  .hint { color:#8b949e; font-size:0.85rem; margin-top:16px; }
+  code { background:#161b22; padding:2px 6px; border-radius:3px; }
+</style>
+</head>
+<body>
+<h1>hermes-dist operator</h1>
+<p>Enter your OPERATOR_TOKEN to access the dashboard.</p>
+<form method="POST" action="/dashboard/login">
+  <input type="text" name="token" placeholder="64-char hex token" autofocus autocomplete="off">
+  <button type="submit">Sign in</button>
+  {% if error %}<div class="err">Invalid token.</div>{% endif %}
+</form>
+<p class="hint">The token is the value of <code>OPERATOR_TOKEN</code> in your relay's environment. 24-hour cookie session.</p>
+</body>
+</html>

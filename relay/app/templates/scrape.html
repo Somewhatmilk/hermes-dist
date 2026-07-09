@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scrape pool — hermes-dist</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; background:#0e1116; color:#c9d1d9; max-width: 1100px; margin: 0 auto; padding: 24px; }
+  h1 { color:#fff; font-size: 1.6rem; }
+  nav { margin-bottom: 32px; }
+  nav a { color:#58a6ff; text-decoration:none; margin-right: 16px; }
+  nav a.active { color:#fff; font-weight:600; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:16px; margin-bottom: 24px; }
+  .card { background:#161b22; padding:16px; border-radius:8px; border:1px solid #30363d; }
+  .card .num { font-size: 1.6rem; color:#fff; font-weight:600; }
+  .card .lbl { color:#8b949e; font-size: 0.85rem; text-transform: uppercase; }
+  table { width:100%; border-collapse: collapse; background:#161b22; border:1px solid #30363d; border-radius:6px; overflow:hidden; }
+  th { background:#0d1117; text-align: left; padding: 12px; font-size:0.85rem; color:#8b949e; text-transform:uppercase; }
+  td { padding: 10px 12px; border-top:1px solid #21262d; font-size:0.85rem; }
+  td.mono { font-family: ui-monospace, monospace; }
+  .empty { color:#8b949e; padding:32px; text-align:center; }
+</style>
+</head>
+<body>
+<h1>Scraper pool</h1>
+<nav>
+  <a href="/dashboard/">Overview</a>
+  <a href="/dashboard/installed">Installed</a>
+  <a href="/dashboard/events">Events</a>
+  <a href="/dashboard/audit">Audit</a>
+  <a href="/dashboard/scrape" class="active">Scrape pool</a>
+  <a href="/dashboard/peer">Peer index</a>
+  <a href="/dashboard/release">Release</a>
+  <a href="/dashboard/logout">Logout</a>
+</nav>
+
+<div class="grid">
+  <div class="card"><div class="num">{{ stats.total_slots }}</div><div class="lbl">Active slots</div></div>
+  <div class="card"><div class="num">{{ stats.max_slots }}</div><div class="lbl">Max slots</div></div>
+</div>
+
+{% if stats.slots %}
+<table>
+<thead><tr><th>Slot ID</th><th>User</th><th>Persona</th><th>Proxy</th><th>Cookies?</th><th>Last used</th></tr></thead>
+<tbody>
+{% for s in stats.slots %}
+<tr>
+  <td class="mono">{{ s.slot_id }}</td>
+  <td class="mono">{{ s.user_uuid }}…</td>
+  <td>{{ s.persona_id }}</td>
+  <td class="mono">{{ s.proxy }}</td>
+  <td>{{ '✓' if s.has_cookies else '—' }}</td>
+  <td class="mono">{{ s.last_used }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% else %}
+<div class="empty">No scraper slots yet. Slots are created on first scrape request per (user, persona).</div>
+{% endif %}
+
+</body>
+</html>

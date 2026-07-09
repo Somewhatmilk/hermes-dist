@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Release — hermes-dist</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; background:#0e1116; color:#c9d1d9; max-width: 800px; margin: 0 auto; padding: 24px; }
+  h1 { color:#fff; font-size: 1.6rem; }
+  nav { margin-bottom: 32px; }
+  nav a { color:#58a6ff; text-decoration:none; margin-right: 16px; }
+  nav a.active { color:#fff; font-weight:600; }
+  form { background:#161b22; padding:24px; border-radius:8px; border:1px solid #30363d; }
+  label { display:block; margin-bottom:4px; color:#8b949e; font-size:0.85rem; text-transform:uppercase; }
+  input, textarea { width:100%; padding:10px; background:#0d1117; color:#c9d1d9; border:1px solid #30363d; border-radius:6px; font-size:0.9rem; margin-bottom:16px; box-sizing:border-box; }
+  textarea { min-height: 80px; font-family: ui-monospace, monospace; font-size:0.85rem; }
+  button { padding:10px 20px; background:#238636; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:0.95rem; }
+  button:hover { background:#2ea043; }
+  .msg { padding:12px 16px; border-radius:6px; margin-bottom:16px; font-size:0.9rem; }
+  .msg.ok { background:#1f6feb22; color:#79c0ff; border:1px solid #1f6feb44; }
+  .msg.err { background:#da363322; color:#ffa198; border:1px solid #f8514944; }
+  .hint { color:#8b949e; font-size:0.85rem; margin-top:16px; }
+  code { background:#161b22; padding:2px 6px; border-radius:3px; }
+</style>
+</head>
+<body>
+<h1>Release a new version</h1>
+<nav>
+  <a href="/dashboard/">Overview</a>
+  <a href="/dashboard/installed">Installed</a>
+  <a href="/dashboard/events">Events</a>
+  <a href="/dashboard/audit">Audit</a>
+  <a href="/dashboard/scrape">Scrape pool</a>
+  <a href="/dashboard/peer">Peer index</a>
+  <a href="/dashboard/release" class="active">Release</a>
+  <a href="/dashboard/logout">Logout</a>
+</nav>
+
+{% if message %}
+{% if message.startswith('PUBLISHED') %}
+<div class="msg ok">✓ {{ message }}</div>
+{% else %}
+<div class="msg err">✗ {{ message }}</div>
+{% endif %}
+{% endif %}
+
+<form method="POST" action="/dashboard/release">
+  <label>SOUL.md version (monotonic, e.g. v3)</label>
+  <input type="text" name="soul_md_version" placeholder="v3" required>
+  <label>config.yaml version</label>
+  <input type="text" name="config_yaml_version" placeholder="v3" required>
+  <label>Hermes version pinned</label>
+  <input type="text" name="hermes_version" value="0.4.2">
+  <label>Rollout %</label>
+  <input type="number" name="rollout_pct" value="100" min="1" max="100">
+  <label>Release notes (visible to users)</label>
+  <textarea name="message" placeholder="What's new in this release..."></textarea>
+  <button type="submit">Publish</button>
+</form>
+
+<p class="hint">
+  The publish reads <code>~/hermes-dist/default-template/SOUL.md</code> and
+  <code>config.yaml</code> from disk. Edit them with your normal workflow,
+  then publish from here. All users receive the update on their next
+  heartbeat (≤30s).
+</p>
+
+</body>
+</html>
