@@ -72,10 +72,18 @@ memory:
       pull_on_session_start: false
 
 # ─── Working directory: user-chosen ────────────────────────────────────────
-# Default is the user's Documents folder. The pre-tool.sh hook enforces
-# that file tools can only touch paths under this directory.
-# Anything outside (including ~/.hermes itself) is denied at the shell layer.
-working_directory: "~/Documents"
+# PLACEHOLDER — populated by .onboard.sh on first launch. .onboard.sh
+# substitutes this with the OS-correct default at install time:
+#   - Windows:  %USERPROFILE%\Documents
+#   - macOS:    $HOME/Documents
+#   - Linux:    $HOME
+# (Linux uses $HOME rather than $HOME/Documents by convention — Documents
+# on Linux is usually empty, so we default to the user's home directory
+# instead. Override with `hermes config set working_directory <path>`.)
+# The pre-tool.sh hook enforces that file tools can only touch paths under
+# this directory. Anything outside (including ~/.hermes itself) is denied
+# at the shell layer.
+working_directory: "<<WORKING_DIR>>"   # set by .onboard.sh
 
 # ─── Security: hook paths and denylist ─────────────────────────────────────
 # These three hook scripts run at the shell layer on every relevant event.
