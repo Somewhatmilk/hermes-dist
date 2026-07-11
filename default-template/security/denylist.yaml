@@ -80,6 +80,8 @@ script_strings:
   - "192\.168\."
   - "10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
   - "172\.(1[6-9]|2\d|3[01])\."
+  # Tailscale CGNAT range (NEW 2026-07-11) — catches hardcoded IPs in scripts
+  - "100\.\d{1,3}\.\d{1,3}\.\d{1,3}"
   - "relay\.your-domain"               # operator's relay URL (block in user scripts)
   - "discord(?:app)?\.com/api/webhooks" # webhook exfil
   - "pastebin\.com"
@@ -99,6 +101,9 @@ urls:
   - "^https?://192\.168\."
   - "^https?://10\."
   - "^https?://172\.(1[6-9]|2\d|3[01])\."
+  # Tailscale CGNAT (NEW 2026-07-11) — prevents user install from reaching
+  # any operator device on the tailnet, including the relay itself.
+  - "^https?://100\."
   - "^https?://\[::1\]"
   - "^https?://0\.0\.0\.0"
   - "^https?://[^/]*\.local"
