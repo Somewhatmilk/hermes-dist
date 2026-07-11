@@ -9,6 +9,9 @@ Endpoints:
   GET    /api/v1/users           List users (operator auth required)
   GET    /api/v1/audit           List audit log (operator auth required)
   GET    /api/v1/stats/dedup     Dedup hit-ratio + coalesce totals (operator)
+  POST   /api/v1/profile-bundle  Publish a profile bundle (operator auth)
+  GET    /api/v1/profile-bundle  Fetch the latest bundle since=<unix_ts> (HMAC)
+  GET    /api/v1/profile-bundles List bundle metadata (operator auth)
 
 Operator auth: a separate static token (env var OPERATOR_TOKEN) checked via
 X-Operator-Token header. This is intentionally NOT HMAC — operators are
@@ -48,12 +51,41 @@ multiple uvicorn workers from racing on the same archive. See
 relay/README.md for the per-event-type windows.
 
 Operator visibility: GET /api/v1/stats/storage.
+
+────────────────────────────────────────────────────────────────────────────
+T3 push updates (Tailscale board)
+────────────────────────────────────────────────────────────────────────────
+Operators push SOUL.md / config.yaml / toolsets bundles to the relay,
+clients pull the latest bundle every ~60s. This makes a "publish"
+action on the operator side become a "received" action on the user side
+within one heartbeat — no per-user update flow.
+
+POST /api/v1/profile-bundle
+  - operator auth (X-Operator-Token)
+  - body: {soul_md, config_yaml, toolsets_json, version, released_at}
+  - dedup key is `version` (UNIQUE constraint) — republishing the same
+    version returns 200 with `inserted=False` instead of creating a
+    duplicate row. Multiple versions coexist; clients pick the latest.
+
+GET /api/v1/profile-bundle?since=<unix_ts>
+  - user HMAC auth (existing X-Hermes-* headers, with a NEW event_type
+    value of `profile_bundle` that the client signs into the canonical)
+  - returns the latest bundle with released_at_unix > since, or 200
+    with up_to_date=true and no bundle if there isn't one.
+  - canonical for this GET includes the path+query string so a
+    captured signature for `?since=1000` cannot be replayed as
+    `?since=2000`. See hmac_auth.verify_hmac_get_request for details.
+
+GET /api/v1/profile-bundles
+  - operator auth; metadata-only listing of recent bundles.
 """
 
 import os
+import re
 import time
 import secrets
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 
 # fcntl is POSIX-only. On Windows (where devs run tests), fall back to a
@@ -84,9 +116,11 @@ from .models import (
     RegisterRequest, RegisterResponse,
     SubmitResponse, EventsResponse, UsersResponse, HealthResponse,
     StorageStatsResponse,
+    ProfileBundlePublishRequest, ProfileBundlePublishResponse,
+    ProfileBundleFetchResponse, ProfileBundleListResponse,
 )
 from . import sqlite_store
-from .hmac_auth import verify_hmac_request
+from .hmac_auth import verify_hmac_request, verify_hmac_get_request
 
 
 log = logging.getLogger("relay")
@@ -385,6 +419,180 @@ def stats_dedup():
     return sqlite_store.dedup_stats(db_path=DB_PATH)
 
 
+# ─── T3: profile-bundle push updates ──────────────────────────────────────
+
+# The `released_at` field in the publish body is an ISO 8601 UTC string
+# (preferred for human-readable audit). The DB stores BOTH the ISO
+# string and the parsed unix-timestamp so the GET-side `?since=<unix_ts>`
+# query is a fast indexed range scan.
+_ISO_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$")
+
+
+def _parse_iso_to_unix(iso_ts: str) -> int:
+    """
+    Parse 'YYYY-MM-DDTHH:MM:SS[.fff]Z' to a unix timestamp. The fractional
+    second is optional and parsed but discarded (we store integer seconds
+    for the indexed comparison). Raises ValueError on bad input.
+    """
+    # Drop fractional seconds if present (datetime.fromisoformat in 3.11
+    # handles 'Z' natively).
+    s = iso_ts
+    if "." in s:
+        head, _, tail = s.partition(".")
+        # tail is "fffZ" — keep only the integer seconds
+        s = head + "Z"
+    dt = datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    return int(dt.timestamp())
+
+
+@app.post(
+    "/api/v1/profile-bundle",
+    response_model=ProfileBundlePublishResponse,
+    dependencies=[Depends(require_operator)],
+)
+def publish_profile_bundle(req: ProfileBundlePublishRequest):
+    """
+    Operator publishes a new profile bundle.
+
+    Body fields:
+      - soul_md         str  (the SOUL.md content for the user)
+      - config_yaml     str  (the user's profile-scoped config.yaml)
+      - toolsets_json   str  (JSON list of toolset names, sent as a string
+                              so the operator can pick whatever shape the
+                              user's toolset config wants)
+      - version         str  (semver-ish, dedup key — UNIQUE constraint)
+      - released_at     str  (ISO 8601 UTC timestamp; the bundle's "logical
+                              release time", which is what the client's
+                              `?since=<unix_ts>` compares against)
+
+    The `version` field is the dedup key. Republishing the same version
+    returns 200 with `inserted=False` and the existing row's metadata —
+    the operator can re-run their publish script idempotently.
+
+    Audit: every publish (inserted True OR False) is recorded in
+    audit_log with action="profile_bundle_publish" so the operator
+    timeline shows every push attempt.
+    """
+    if not _ISO_TS_RE.match(req.released_at):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "released_at must be ISO 8601 UTC with Z suffix, "
+                f"e.g. 2026-07-11T12:34:56Z (got: {req.released_at!r})"
+            ),
+        )
+    try:
+        released_at_unix = _parse_iso_to_unix(req.released_at)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=422,
+            detail=f"released_at could not be parsed: {e}",
+        )
+
+    result = sqlite_store.publish_profile_bundle(
+        version=req.version,
+        released_at_unix=released_at_unix,
+        soul_md=req.soul_md,
+        config_yaml=req.config_yaml,
+        toolsets_json=req.toolsets_json,
+        db_path=DB_PATH,
+    )
+
+    # Look up the full row to surface bytes_total in the response
+    latest = sqlite_store.get_latest_profile_bundle(db_path=DB_PATH)
+    bytes_total = latest["bytes_total"] if latest else 0
+
+    sqlite_store.audit(
+        DB_PATH,
+        actor="operator",
+        action="profile_bundle_publish",
+        target=req.version,
+        details=(
+            f"inserted={result['inserted']} bundle_id={result['bundle_id']} "
+            f"released_at_unix={result['released_at_unix']} "
+            f"bytes={bytes_total}"
+        ),
+    )
+
+    return ProfileBundlePublishResponse(
+        ok=True,
+        inserted=result["inserted"],
+        bundle_id=result["bundle_id"],
+        version=result["version"],
+        released_at_unix=result["released_at_unix"],
+        released_at_iso=req.released_at,
+        published_at=result["published_at"],
+        bytes_total=bytes_total,
+    )
+
+
+@app.get("/api/v1/profile-bundle", response_model=ProfileBundleFetchResponse)
+async def fetch_profile_bundle(
+    since: int,
+    verified: dict = Depends(verify_hmac_get_request),
+):
+    """
+    User polls for the latest profile bundle newer than `since` (unix ts).
+
+    Auth: user HMAC via the standard X-Hermes-* headers, with a NEW
+    event_type value of "profile_bundle" (the client signs this into
+    the canonical). The HMAC canonical for this GET also includes the
+    path+query string — see verify_hmac_get_request in hmac_auth.py.
+
+    Response shape:
+      - up_to_date=true,  bundle=None      → no new bundle
+      - up_to_date=false, bundle={...}      → client should apply it
+
+    The `server_time_unix` field gives the client a clock-skew-free
+    "current time" so it can advance its local `since` pointer
+    even when up_to_date=true (typical 60s heartbeat pattern:
+    since = server_time_unix, then re-poll).
+    """
+    bundle = sqlite_store.get_latest_profile_bundle_since(
+        since_unix=since, db_path=DB_PATH
+    )
+    server_time_unix = int(time.time())
+
+    if bundle is None:
+        return ProfileBundleFetchResponse(
+            ok=True,
+            up_to_date=True,
+            server_time_unix=server_time_unix,
+            since_unix=since,
+            bundle=None,
+        )
+
+    sqlite_store.audit(
+        DB_PATH,
+        actor=verified["user_uuid"],
+        action="profile_bundle_fetch",
+        target=bundle["version"],
+        details=(
+            f"since={since} returned bundle_id={bundle['bundle_id']} "
+            f"released_at_unix={bundle['released_at_unix']}"
+        ),
+    )
+
+    return ProfileBundleFetchResponse(
+        ok=True,
+        up_to_date=False,
+        server_time_unix=server_time_unix,
+        since_unix=since,
+        bundle=bundle,
+    )
+
+
+@app.get(
+    "/api/v1/profile-bundles",
+    response_model=ProfileBundleListResponse,
+    dependencies=[Depends(require_operator)],
+)
+def list_profile_bundles(limit: int = 20):
+    """Operator-only metadata listing of recent bundles (no body content)."""
+    bundles = sqlite_store.list_profile_bundles(limit=limit, db_path=DB_PATH)
+    return ProfileBundleListResponse(ok=True, count=len(bundles), bundles=bundles)
+
+
 # ─── Root ──────────────────────────────────────────────────────────────────
 
 @app.get("/")
@@ -401,5 +609,8 @@ def root():
             "GET  /api/v1/audit  (operator)",
             "GET  /api/v1/stats/storage (operator)",
             "GET  /api/v1/stats/dedup (operator)",
+            "POST /api/v1/profile-bundle (operator)",
+            "GET  /api/v1/profile-bundle (HMAC, since=<unix_ts>)",
+            "GET  /api/v1/profile-bundles (operator)",
         ],
     }

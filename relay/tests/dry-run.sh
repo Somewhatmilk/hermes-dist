@@ -96,6 +96,29 @@ if [ -f test-data/relay.db ]; then
 fi
 bash tests/flood-dedup-test.sh
 
+# 6b. Run the T3 profile-bundle push test (operator publish + user fetch)
+echo
+echo "→ Running T3 profile-bundle push test..."
+if [ -f test-data/relay.db ]; then
+    rm -f test-data/relay.db test-data/relay.db-shm test-data/relay.db-wal
+    docker stop "$CONTAINER" > /dev/null
+    CONTAINER=$(docker run -d --rm \
+        --name hermes-relay-test \
+        -p 127.0.0.1:9119:9119 \
+        -e OPERATOR_TOKEN="$OPERATOR_TOKEN" \
+        -e RELAY_DISABLE_SCHEDULER=1 \
+        -v "$TEST_DATA_SRC:/var/lib/hermes-relay" \
+        hermes-relay:test)
+    for i in {1..30}; do
+        if curl -sS http://127.0.0.1:9119/api/v1/healthz > /dev/null 2>&1; then
+            echo "  ✓ Restarted cleanly after ${i}s"
+            break
+        fi
+        sleep 1
+    done
+fi
+bash tests/profile-bundle-test.sh
+
 # 7. Cleanup
 echo
 echo "→ Cleaning up..."

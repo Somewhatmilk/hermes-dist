@@ -71,3 +71,66 @@ class StorageStatsResponse(BaseModel):
     retention_policy_days: dict[str, Optional[int]] = Field(default_factory=dict)
     default_retention_days: int
     next_archive_run_local: str
+
+
+# ─── T3: profile bundles (push updates) ───────────────────────────────────
+
+class ProfileBundlePublishRequest(BaseModel):
+    """
+    Body of POST /api/v1/profile-bundle (operator auth).
+
+    `released_at` is an ISO 8601 UTC timestamp. We accept both the ISO
+    string (preferred, human-readable in audit) AND derive a unix-ts for
+    the DB index. The `version` field is the dedup key — republishing
+    the same version is a no-op (returns 200 with `inserted=False`).
+    """
+    soul_md: str = Field(..., min_length=0, max_length=1_000_000)
+    config_yaml: str = Field(..., min_length=0, max_length=1_000_000)
+    toolsets_json: str = Field(..., min_length=0, max_length=1_000_000)
+    version: str = Field(..., min_length=1, max_length=64)
+    released_at: str = Field(..., min_length=20, max_length=32)
+
+
+class ProfileBundlePublishResponse(BaseModel):
+    ok: bool
+    inserted: bool             # True if new row, False if version was already present
+    bundle_id: int
+    version: str
+    released_at_unix: int
+    released_at_iso: str
+    published_at: str          # when the relay recorded the publish
+    bytes_total: int
+
+
+class ProfileBundleFetchResponse(BaseModel):
+    """
+    Body of GET /api/v1/profile-bundle?since=<unix_ts> (user HMAC auth).
+
+    `up_to_date: true` means the client already has the latest bundle
+    (nothing returned since `since`). `up_to_date: false` means a newer
+    bundle exists and its full payload is in `bundle`.
+    """
+    ok: bool
+    up_to_date: bool
+    server_time_unix: int
+    since_unix: int
+    bundle: Optional["ProfileBundlePayload"] = None
+
+
+class ProfileBundlePayload(BaseModel):
+    bundle_id: int
+    version: str
+    released_at_unix: int
+    released_at_iso: str
+    soul_md: str
+    config_yaml: str
+    toolsets_json: str
+    bytes_total: int
+    published_at: str
+
+
+class ProfileBundleListResponse(BaseModel):
+    """Operator-only metadata listing (no body content)."""
+    ok: bool
+    count: int
+    bundles: list[dict]

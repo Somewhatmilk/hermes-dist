@@ -192,6 +192,26 @@ def init_db(db_path: Path = DEFAULT_DB_PATH):
         );
 
         CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts);
+
+        -- ─── T3: profile bundles (push updates) ─────────────────────────
+        -- One row per push. The latest row is the current bundle. Clients
+        -- poll with `since=<unix_ts>` and we return the row whose
+        -- released_at_unix > since. Version string is the dedup key
+        -- (operator republishing the same version is a no-op).
+        CREATE TABLE IF NOT EXISTS profile_bundles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            version TEXT NOT NULL,
+            released_at_unix INTEGER NOT NULL,
+            released_at_iso TEXT NOT NULL,
+            soul_md TEXT NOT NULL,
+            config_yaml TEXT NOT NULL,
+            toolsets_json TEXT NOT NULL,
+            bytes_total INTEGER NOT NULL,
+            published_at TEXT NOT NULL,
+            UNIQUE(version)
+        );
+        CREATE INDEX IF NOT EXISTS idx_profile_bundles_released
+            ON profile_bundles(released_at_unix DESC);
         """)
 
         # ─── T9: in-place migrations for pre-T9 databases ────────────────
@@ -822,3 +842,189 @@ def get_storage_stats(db_path: Path = DEFAULT_DB_PATH) -> dict:
         "default_retention_days": DEFAULT_RETENTION_DAYS,
         "next_archive_run_local": next_run_local,
     }
+
+
+# ─── T3: profile bundles (push updates) ───────────────────────────────────
+#
+# One row per push. The newest row is the current bundle; clients poll
+# with `?since=<unix_ts>` and we return the row whose `released_at_unix`
+# is strictly greater than `since`. `version` is the dedup key — the
+# `UNIQUE(version)` constraint makes republishing the same version a
+# no-op (HTTP 200 with `inserted=False`).
+#
+# Why a separate table, not the existing `events` table?  Two reasons:
+#   1. Push content is operator-authored, not user-authored. Mixing the
+#      streams in one table makes the "is the user current?" query
+#      ambiguous and forces the dedup code to special-case a non-event.
+#   2. The events table has retention + dedup rules from T9/T10 that
+#      don't apply here (a bundle is meant to live until replaced).
+
+def publish_profile_bundle(
+    version: str,
+    released_at_unix: int,
+    soul_md: str,
+    config_yaml: str,
+    toolsets_json: str,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> dict:
+    """
+    Insert a new profile bundle, or no-op if `version` already exists.
+
+    Returns:
+      {
+        "inserted": bool,          # True if new row, False if version was already present
+        "bundle_id": int,          # row id of the canonical row
+        "version": str,
+        "released_at_unix": int,
+        "published_at": str,       # ISO 8601 UTC, when the relay recorded the publish
+      }
+    """
+    released_at_iso = time.strftime(
+        "%Y-%m-%dT%H:%M:%SZ", time.gmtime(int(released_at_unix))
+    )
+    published_at = _now_iso()
+    bytes_total = (
+        len(soul_md.encode("utf-8"))
+        + len(config_yaml.encode("utf-8"))
+        + len(toolsets_json.encode("utf-8"))
+    )
+
+    with get_conn(db_path) as conn:
+        existing = conn.execute(
+            "SELECT id, released_at_unix FROM profile_bundles WHERE version = ?",
+            (version,),
+        ).fetchone()
+        if existing:
+            return {
+                "inserted": False,
+                "bundle_id": existing[0],
+                "version": version,
+                "released_at_unix": existing[1],
+                "published_at": published_at,
+            }
+        cursor = conn.execute(
+            """
+            INSERT INTO profile_bundles
+                (version, released_at_unix, released_at_iso, soul_md, config_yaml,
+                 toolsets_json, bytes_total, published_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                version,
+                int(released_at_unix),
+                released_at_iso,
+                soul_md,
+                config_yaml,
+                toolsets_json,
+                bytes_total,
+                published_at,
+            ),
+        )
+        return {
+            "inserted": True,
+            "bundle_id": cursor.lastrowid,
+            "version": version,
+            "released_at_unix": int(released_at_unix),
+            "published_at": published_at,
+        }
+
+
+def get_latest_profile_bundle_since(
+    since_unix: int,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> Optional[dict]:
+    """
+    Return the latest profile bundle whose `released_at_unix` is strictly
+    greater than `since_unix`, or None if no such bundle exists.
+
+    The returned dict is the full payload (soul_md, config_yaml,
+    toolsets_json) plus metadata (version, released_at_unix,
+    released_at_iso, published_at, bytes_total). Designed to be
+    JSON-serialised directly into the GET response.
+
+    `since_unix` is treated as exclusive: a bundle whose released_at_unix
+    equals `since_unix` is NOT returned (the client already has it).
+    """
+    with get_conn(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT id, version, released_at_unix, released_at_iso,
+                   soul_md, config_yaml, toolsets_json, bytes_total, published_at
+            FROM profile_bundles
+            WHERE released_at_unix > ?
+            ORDER BY released_at_unix DESC
+            LIMIT 1
+            """,
+            (int(since_unix),),
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "bundle_id": row[0],
+            "version": row[1],
+            "released_at_unix": row[2],
+            "released_at_iso": row[3],
+            "soul_md": row[4],
+            "config_yaml": row[5],
+            "toolsets_json": row[6],
+            "bytes_total": row[7],
+            "published_at": row[8],
+        }
+
+
+def get_latest_profile_bundle(
+    db_path: Path = DEFAULT_DB_PATH,
+) -> Optional[dict]:
+    """Return the most recently published bundle, or None."""
+    with get_conn(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT id, version, released_at_unix, released_at_iso,
+                   soul_md, config_yaml, toolsets_json, bytes_total, published_at
+            FROM profile_bundles
+            ORDER BY released_at_unix DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "bundle_id": row[0],
+            "version": row[1],
+            "released_at_unix": row[2],
+            "released_at_iso": row[3],
+            "soul_md": row[4],
+            "config_yaml": row[5],
+            "toolsets_json": row[6],
+            "bytes_total": row[7],
+            "published_at": row[8],
+        }
+
+
+def list_profile_bundles(
+    limit: int = 20,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> list[dict]:
+    """Return metadata (no body) for the N most recent bundles."""
+    with get_conn(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, version, released_at_unix, released_at_iso,
+                   bytes_total, published_at
+            FROM profile_bundles
+            ORDER BY released_at_unix DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [
+            {
+                "bundle_id": r[0],
+                "version": r[1],
+                "released_at_unix": r[2],
+                "released_at_iso": r[3],
+                "bytes_total": r[4],
+                "published_at": r[5],
+            }
+            for r in rows
+        ]
