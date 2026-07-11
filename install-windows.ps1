@@ -228,7 +228,35 @@ if (-not $SkipScheduler) {
 @echo off
 setlocal
 cd /d "$DIST_DIR"
-git pull --ff-only 2>&1
+git pull --ff-only >nul 2>&1
+rem v0.4.0: also check GitHub releases for newer tagged versions
+rem and toast the user (no auto-apply)
+where curl >nul 2>&1
+if %ERRORLEVEL%==0 (
+    rem Get the latest tag from GitHub (no auth needed for public releases)
+    for /f "delims=" %%t in ('curl -fsSL "https://api.github.com/repos/Somewhatmilk/hermes-dist/releases/latest" 2^>nul ^| findstr /B "  \"tag_name\""') do (
+        set "LATEST_TAG=%%t"
+    )
+    rem Local pinned version lives at "%USERPROFILE%\.hermes\profiles\*.hermes-dist-version"
+    set "LOCAL_TAG="
+    for /f "delims=" %%f in ('dir /b "%USERPROFILE%\.hermes\profiles\*.hermes-dist-version" 2^>nul') do (
+        set "LOCAL_TAG=%%LOCAL_TAG! %%f"
+    )
+    rem Extract tag_name= "v0.X.Y" via simple parse
+    echo %LATEST_TAG% | findstr /C:"\"tag_name\"" >nul 2>&1
+    if not errorlevel 1 (
+        for /f "tokens=2 delims=:, " %%v in ('echo %LATEST_TAG% ^| findstr /C:"\"tag_name\""') do (
+            set "GTAG=%%~v"
+        )
+        rem Strip quotes if any
+        set "GTAG=%GTAG:"=%"
+        echo Latest operator version: %GTAG%
+        echo Your pinned version:    !LOCAL_TAG!
+        if not "!LOCAL_TAG!"=="%GTAG%" (
+            powershell -NoProfile -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show('hermes-dist update available: !GTAG! Run `hermes update-dist` to review and apply.','Hermes Dist','OK','Information')" 2>nul
+        )
+    )
+)
 endlocal
 "@ | Set-Content -Path $updateCmd -Encoding ASCII
 
