@@ -113,6 +113,14 @@ if "$DIST_REPO":
         config
     )
 
+# Substitute the working_directory placeholder. .onboard.sh is invoked by the
+# per-OS installer with WORKING_DIR exported in the environment, so the same
+# script can serve Windows / macOS / Linux without per-OS branches.
+import os
+working_dir = os.environ.get("WORKING_DIR") or os.path.expanduser("~")
+config = config.replace("<<WORKING_DIR>>", working_dir)
+print(f"Working directory set to: {working_dir}")
+
 with open(config_path, 'w', encoding='utf-8') as f:
     f.write(config)
 
