@@ -8,6 +8,8 @@ The relay runs on **this PC** (the operator's box) and is reached over **Tailsca
 
 **v0.3.0 update (this commit):** cross-OS installers (Linux/macOS/Windows), per-OS path detection, Tailscale CGNAT 100.x.x.x denied in security/denylist.yaml, push-update heartbeat (`POST /api/v1/profile-bundle` + 60s client poll), profile-bundle replaces operator-pull on every config change.
 
+**v0.4.0 design (this commit):** heartbeat replaced with **user-initiated `hermes update-dist`** (no auto-apply). On hermes launch / daily scheduled task, the installer checks `https://api.github.com/repos/Somewhatmilk/hermes-dist/releases/latest`. If newer than `~/.hermes/profiles/<uuid>/.hermes-dist-version`, a toast prompts the user: *"hermes-dist v0.3.1 available. Run `hermes update-dist` to review and apply."* User runs `hermes update-dist` to see the diff and approve. Skills shipped in `default-template/skills/` (10 universal skills based on operator-side usage analysis), 4 auto-load (`failures-journal`, `routing`, `cartographer-prompt-gate`, `mnemosyne-memory` = ~104 KB system-prompt cost), 6 opt-in.
+
 **Verified-live state (2026-07-11, this commit):**
 - Relay at v0.2.2 (commit `3ca9857`) with v0.3.0 installer updates (commit `b2c8a86`)
 - `--workers 1` (PoC, in-process nonce store)

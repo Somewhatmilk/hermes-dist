@@ -123,3 +123,25 @@ update:
   tag_pattern: "v*"
   auto_install: false                    # user always confirms
   silent_security_patches: true          # denylist + hook scripts force-pulled
+
+# ─── Auto-loaded skills (universal, smallest, highest-impact) ─────────────
+# 4 skills ship in default-template/skills/ AND auto-load into the system
+# prompt. Total ~104 KB. Larger universal skills (security, mnemosyne-curator,
+# hermes-session-open-inventory, hermes-skill-loading-disciplines,
+# hermes-misbehavior-diagnosis, skill-library-consolidator) ship in the
+# same dir but the user must `hermes skills install <name>` to load them
+# (per the hermes-distribution-packaging pitfall: "skill mirrors bloat the
+# system prompt by ~7 KB each").
+skills_auto_load:
+  - failures-journal                # 7 KB  - error patterns + recovery
+  - routing                          # 32 KB - profile dispatch (always-loaded)
+  - cartographer-prompt-gate         # 32 KB - lean prompts before write
+  - mnemosyne-memory                 # 33 KB - memory provider wiring
+
+# Skills shipped in default-template/skills/ but NOT auto-loaded:
+#   security                          (15 KB) - opt-in via `hermes skills install security`
+#   hermes-session-open-inventory     (65 KB) - opt-in
+#   skill-library-consolidator        (44 KB) - opt-in
+#   mnemosyne-curator                 (37 KB) - opt-in
+#   hermes-skill-loading-disciplines  (68 KB) - opt-in
+#   hermes-misbehavior-diagnosis      (29 KB) - opt-in

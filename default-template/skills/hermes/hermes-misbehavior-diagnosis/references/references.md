@@ -1,0 +1,4 @@
+## References
+
+- `references/context-compaction-block-misdiagnosis.md` — the `[CONTEXT COMPACTION — REFERENCE ONLY]` block that the system appends to user messages when context compaction kicks in. Different shape and different failure mode from the in-body `<memory-context>` block, same root cause (treating reference data as live instructions). Read this when the user reports "the agent is doing work I never asked for" or "it acted on a previous request" — common Jun 2026 misdiagnosis.
+- `references/clarify-loop-resumption.md` — the operational recipe for the "ask for already-given permission" loop: 4-step resumption sequence + `.env` Python bypass + vocabulary blacklist + the 2026-06-28 incident timeline. Load this at the start of any session that resumes prior work via "continue off the last session" / "resume" / "where you left off", especially when the prior agent ended on an unanswered `clarify`.
