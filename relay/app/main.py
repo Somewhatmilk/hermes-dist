@@ -215,7 +215,9 @@ def _start_retention_scheduler():
         lock_fd.close()
         return
 
-    sched = BackgroundScheduler(timezone="local")
+    # 'local' string is rejected by apscheduler on slim images (no /usr/share/zoneinfo)
+    # — pass a real tz. UTC is fine for a daily 03:00 cron across single-host deploys.
+    sched = BackgroundScheduler(timezone="UTC")
     sched.add_job(
         _retention_job,
         trigger=CronTrigger(hour=3, minute=0),
