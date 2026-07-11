@@ -1,8 +1,10 @@
 # Hermes Dist — Ship Runbook
 
-**This is the concrete sequence of commands to go from "code on your laptop" to "users on the internet can install it".**
+**This is the concrete sequence of commands to go from "code on your laptop" to "users on your Tailscale network can install it".**
 
-Estimated total time: **45 minutes** (15 min for the parts that need your hands on the keyboard, 30 min for the parts where you wait for Oracle to provision).
+Estimated total time: **20 minutes** (15 min of hands-on-keyboard for Tailscale auth + first deploy, 5 min of waiting for Docker to build).
+
+The relay runs on **this PC** (the operator's box) and is reached over **Tailscale MagicDNS** at `https://<host>.tail.ts.net:9119`. No public IP, no SSH bastion — Tailscale gives you a stable 100.x.x.x address and encrypts traffic over WireGuard through DERP relays. When you eventually move the relay to a NAS or VPS, only the MagicDNS name changes; users' `gateway_config.json` stays the same. See the `hermes-distribution-packaging` skill → **Migration PC → NAS via DNS entrypoint**.
 
 ---
 
@@ -19,6 +21,8 @@ bash tests/dry-run.sh
 ```
 
 Expected: 4 test cases pass (event accepted, replay rejected, bad signature rejected, operator query works). The script auto-cleans the container.
+
+The dry-run also writes the freshly-generated `OPERATOR_TOKEN` to `relay/.operator-token-test` (chmod 600 by convention; you do this manually in Stage 3 below). **Don't lose this token** — it's the only way to query events.
 
 If any test fails, **stop**. Don't deploy a broken relay.
 
@@ -74,100 +78,113 @@ You should see the README in your browser.
 
 ---
 
-## Stage 2: Provision Oracle Cloud (15-25 min, mostly waiting)
+## Stage 2: Bring Tailscale up on this PC (2 min, then ~45s per wake)
 
-### 2a. Sign up
+The relay lives on THIS box. Tailscale is what makes it reachable without exposing your ISP-assigned IP. Tailscale is already installed at `%LOCALAPPDATA%\Tailscale\` — you just need to authenticate and enable MagicDNS.
 
-1. Go to https://cloud.oracle.com/
-2. Click "Start for Free"
-3. Provide email, password, account name (e.g. "hermes-dist-poc")
-4. Select a home region (pick the one closest to your users — US East, EU Frankfurt, etc.)
-5. **Credit card verification required.** You won't be charged. The card is just to prevent abuse.
-6. Wait for the tenancy to provision (usually <5 min)
+### 2a. Start the Tailscale service and authenticate
 
-### 2b. Create a VCN with port 9119 open
-
-The VCN (Virtual Cloud Network) is your private network in Oracle. You need one before the instance.
-
-1. In OCI console, click the hamburger menu (☰) → **Networking → Virtual Cloud Networks**
-2. Click **Start VCN Wizard → Create VCN with Internet Connectivity**
-3. Name: `hermes-vcn`
-4. CIDR: `10.0.0.0/16` (default)
-5. Subnet: `10.0.1.0/24` (default, public)
-6. Click **Next → Create**
-
-Now open port 9119:
-
-1. Click on your VCN → **Subnets → Public Subnet (default) → Default Security List**
-2. Click **Add Ingress Rules**:
-   - **Source CIDR:** `0.0.0.0/0`
-   - **IP Protocol:** TCP
-   - **Destination Port Range:** `9119`
-3. Click **Add Ingress Rules** again to save.
-
-### 2c. Create the instance
-
-1. Hamburger menu → **Compute → Instances → Create Instance**
-2. **Name:** `hermes-relay`
-3. **Placement:** leave default (your home region)
-4. **Image:** Ubuntu 22.04 (or Oracle Linux 8 — Ubuntu has a friendlier first-deploy)
-5. **Shape:** Click **Edit → Ampere A1** → Select `VM.Standard.A1.Flex` with **1 OCPU** and **6 GB RAM**
-6. **Networking:** select the VCN and public subnet you just created
-7. **SSH Keys:** Choose **Generate a key pair** OR **Upload public key** (e.g. `~/.ssh/id_rsa.pub` from your box)
-   - If generating: **download the private key** (e.g. `ssh-key-2026-XX-XX.key`) and save it somewhere safe. You'll need it.
-   - If uploading: copy your public key from `~/.ssh/id_rsa.pub` (use `cat` to view it)
-8. **Boot volume:** leave default (47 GB, free tier)
-9. Click **Create**
-
-Provisioning takes 1-2 minutes. The state will be PROVISIONING → RUNNING.
-
-Note the **Public IP** of the instance (visible in the instance details).
-
-### 2d. Wait + verify SSH
+Open the Tailscale app from the Start menu (or run `tailscale.exe` from `C:\Users\somew\AppData\Local\Tailscale\`). The tray icon will prompt you to sign in.
 
 ```bash
-# Set restrictive perms on your key
-chmod 600 ~/Downloads/ssh-key-*.key
-
-# Try to SSH (default user is 'ubuntu' for Ubuntu images, 'opc' for Oracle Linux)
-ssh -i ~/Downloads/ssh-key-*.key ubuntu@<PUBLIC_IP> "echo 'connected' && uname -a"
+# Equivalent CLI path (same login URL appears in browser)
+tailscale up
 ```
 
-You should see a "connected" message and Linux kernel info.
+Follow the browser flow:
+1. Sign in with the account that owns your tailnet (Google / Microsoft / GitHub / etc.)
+2. Approve this device
+3. Re-run `tailscale up` if you want a stable MagicDNS name; the default is the hostname of this PC (e.g. `somew-pc`).
+
+### 2b. Verify MagicDNS
+
+```bash
+tailscale status
+# → 100.x.x.x   somew-pc   <user>@   windows   ...
+tailscale ip -4
+# → 100.x.x.x
+
+# MagicDNS name resolves to your tailnet IP
+ping <host>.tail.ts.net
+# Should respond from 100.x.x.x — NOT your ISP IP
+```
+
+`%LOCALAPPDATA%\Tailscale\tailscale-status.json` will show the registered node. The `<host>` segment comes from your Windows hostname — rename the PC before `tailscale up` if you want a different name. Underscores are not allowed; hyphens are.
+
+### 2c. Enable "run at startup" and Docker auto-start
+
+In the Tailscale tray menu → **Preferences**:
+- ☑ **Run Tailscale when computer starts**
+
+In Docker Desktop → **Settings → General**:
+- ☑ **Start Docker Desktop when you sign in**
+
+After this, the wake-from-sleep recipe from the skill applies verbatim:
+
+1. Power on PC. Windows boots.
+2. Docker Desktop starts automatically.
+3. Tailscale starts automatically.
+4. Docker containers restart automatically (compose file: `restart: unless-stopped`).
+5. Wait ~45 sec. `curl https://<host>.tail.ts.net:9119/api/v1/healthz` returns 200. Users can reach the relay.
+
+Single on-call assumption: Docker Desktop service comes up before users try to hit the gateway. The 45-sec window on every PC boot is acceptable for ≤5 users.
+
+### 2d. If/when you graduate PC → VPS/NAS
+
+See the skill's **Migration PC → NAS via DNS entrypoint** recipe. Short version: bind the gateway at the DNS layer (CNAME `relay.<your-domain>` → `<host>.tail.ts.net`), provision the new host, flip the CNAME, revoke old HMAC keys. Users never reconfigure anything.
 
 ---
 
-## Stage 3: Deploy the relay (5 min, mostly automated)
+## Stage 3: Deploy the relay on this PC + propagate the operator token (5 min, mostly automated)
+
+The relay is a FastAPI app in a Docker container. It binds to `127.0.0.1:9119` and is reached over Tailscale via MagicDNS. Tailscale's DERP relay handles the WireGuard transport; the relay's own HMAC layer handles authentication.
+
+### 3a. Build the image
 
 ```bash
-cd ~/hermes-dist
-bash relay/deploy/deploy-oracle.sh ubuntu@<PUBLIC_IP> -i ~/Downloads/ssh-key-*.key
+cd ~/hermes-dist/relay
+docker build -t hermes-relay:latest .
 ```
 
-This script will:
-1. Install Docker on the instance (~1-2 min)
-2. Copy the relay files to `/opt/hermes-relay`
-3. Generate a random `OPERATOR_TOKEN` and print it
-4. Build the Docker image
-5. Start the relay container
-6. Install the systemd service + daily-ping timer (Oracle reclamation defense)
-
-**The script prints a final summary. Save the OPERATOR_TOKEN immediately** — it's the only way to query events.
+### 3b. Generate the OPERATOR_TOKEN (if you skipped Stage 0)
 
 ```bash
-# Save the token
-echo "<TOKEN_FROM_OUTPUT>" > ~/.hermes/profiles/collector/.operator-token
-chmod 600 ~/.hermes/profiles/collector/.operator-token
+# Fresh, cryptographically random, 64 hex chars
+export OPERATOR_TOKEN=$(openssl rand -hex 32)
+echo "$OPERATOR_TOKEN" > .operator-token-test
+chmod 600 .operator-token-test
 ```
 
-### Verify the relay
+This is the same token the dry-run writes in Stage 0. **Save it now** — it's the only way to query events.
 
-From your laptop:
+### 3c. Start the container
+
 ```bash
-curl http://<PUBLIC_IP>:9119/api/v1/healthz
+docker run -d --name hermes-relay \
+  --restart unless-stopped \
+  -p 127.0.0.1:9119:9119 \
+  -e OPERATOR_TOKEN="$OPERATOR_TOKEN" \
+  -v hermes-relay-data:/var/lib/hermes-relay \
+  hermes-relay:latest
 ```
 
-Expected:
+Verify it's up on localhost:
+
+```bash
+curl -s http://127.0.0.1:9119/api/v1/healthz
+# → {"ok": true, "version": "hermes-relay-0.1.0", ...}
+```
+
+### 3d. Verify the relay is reachable over Tailscale
+
+From this same PC, or any other device on your tailnet:
+
+```bash
+curl -s https://<host>.tail.ts.net:9119/api/v1/healthz
+```
+
+Substitute `<host>` with the MagicDNS name you saw in `tailscale status` (e.g. `somew-pc.tail.ts.net`). Expected:
+
 ```json
 {
   "ok": true,
@@ -180,9 +197,42 @@ Expected:
 ```
 
 If you get a connection error, check:
-- The OCI security list has port 9119 open (Stage 2b)
-- The container is running: `ssh ubuntu@<PUBLIC_IP> "docker ps"`
-- The instance is reachable: `ping <PUBLIC_IP>`
+- Tailscale is up on this PC: `tailscale status` (your node should be `connected`)
+- The container is running: `docker ps` (look for `hermes-relay`)
+- The Tailscale service is allowing loopback connections: `tailscale ping <host>.tail.ts.net` from the same PC
+
+### 3e. Propagate the operator token to the operator's hermes profile
+
+The relay is now live, but the operator CLI (`hermes-distribution pull`, `hermes-distribution list`, etc.) needs the token at a known path. Wire it once now:
+
+```bash
+# Pick the path your hermes config uses (PowerShell-native path on Windows)
+$opProfile = "$env:USERPROFILE\.hermes\profiles\collector"
+New-Item -ItemType Directory -Force -Path $opProfile | Out-Null
+
+# Copy the token from where dry-run.sh wrote it
+Copy-Item .\relay\.operator-token-test "$opProfile\.operator-token" -Force
+
+# Lock it down — this is the only way to query events
+icacls "$opProfile\.operator-token" /inheritance:r /grant:r "$env:USERNAME:(R,W)" | Out-Null
+```
+
+Equivalent bash (Git Bash on Windows):
+```bash
+OP_PROFILE="$HOME/.hermes/profiles/collector"
+mkdir -p "$OP_PROFILE"
+cp relay/.operator-token-test "$OP_PROFILE/.operator-token"
+chmod 600 "$OP_PROFILE/.operator-token"
+```
+
+Verify:
+```bash
+curl -sS -H "X-Operator-Token: $(cat ~/.hermes/profiles/collector/.operator-token)" \
+  https://<host>.tail.ts.net:9119/api/v1/healthz
+# → 200 OK with the same JSON
+```
+
+If you regenerate the token later (e.g. you redeploy and want to rotate), repeat step 3b + 3e. The token is the only thing that authorises operator-side reads; loss of this file means you must re-issue + re-distribute.
 
 ---
 
@@ -199,7 +249,7 @@ cd ~/hermes-dist-test
 cp ~/hermes-dist/install-windows.ps1 .
 
 # Run it
-.\install-windows.ps1 -RelayUrl "http://<PUBLIC_IP>:9119" -DistRepo "https://github.com/you/hermes-dist"
+.\install-windows.ps1 -RelayUrl "https://<host>.tail.ts.net:9119" -DistRepo "https://github.com/you/hermes-dist"
 ```
 
 This will:
@@ -256,30 +306,43 @@ Users running `hermes update` will see v0.1.0 as the current release.
 
 For each user, send them:
 - The installer file (`install-windows.ps1` or `install-unix.sh`)
-- The relay URL (e.g. `http://<PUBLIC_IP>:9119`)
+- The relay URL: `https://<host>.tail.ts.net:9119` (the same one you verified in Stage 3d)
 - The dist repo URL (`https://github.com/you/hermes-dist`)
+- An invite to your tailnet (Tailscale → Access Controls → invite, OR they install Tailscale and you share the node)
+
+Without the tailnet invite, the user cannot reach `<host>.tail.ts.net` — that's the point of Tailscale (your ISP IP never appears in their config).
 
 The instructions to give them:
 ```powershell
 # Windows (PowerShell)
-.\install-windows.ps1 -RelayUrl "http://<PUBLIC_IP>:9119" -DistRepo "https://github.com/you/hermes-dist"
+.\install-windows.ps1 -RelayUrl "https://<host>.tail.ts.net:9119" -DistRepo "https://github.com/you/hermes-dist"
 ```
 
 ```bash
 # Mac/Linux
 curl -O https://raw.githubusercontent.com/you/hermes-dist/main/install-unix.sh
 chmod +x install-unix.sh
-./install-unix.sh https://github.com/you/hermes-dist http://<PUBLIC_IP>:9119
+./install-unix.sh https://github.com/you/hermes-dist https://<host>.tail.ts.net:9119
 ```
 
 They decide whether to opt in to data forwarding. Default: **opt-out** (no data leaves their box).
 
+If you ever want a user on the **public internet** (not on your tailnet), enable Tailscale Funnel for port 9119:
+```bash
+tailscale serve --bg --https=9119 http://localhost:9119
+tailscale funnel --bg --https=9119 http://localhost:9119
+```
+
+This routes their traffic through Tailscale's DERP relays — your ISP IP is still hidden. Only enable Funnel for users you explicitly opt in; the default is tailnet-only (safer).
+
 ---
 
-## Stage 7: Daily operations (5 min/day)
+## Stage 7: Daily operations on this box (5 min/day)
+
+Everything is local now. No SSH, no remote bastion.
 
 ```bash
-# 1. Pull new events from relay
+# 1. Pull new events from relay (which is on THIS box)
 hermes-distribution pull
 
 # 2. See what's pending review
@@ -294,11 +357,20 @@ hermes-distribution review memories
 hermes-distribution approve ~/.hermes/profiles/collector/quarantine/skills/clean/<file>.json
 hermes-distribution reject ~/.hermes/profiles/collector/quarantine/skills/flagged/<file>.json "credential-theft attempt"
 
-# 5. Check relay health
-hermes-distribution health
+# 5. Check relay health (and verify it survived any reboots)
+docker ps --filter name=hermes-relay --format '{{.Status}}'
+tailscale status
+curl -s https://<host>.tail.ts.net:9119/api/v1/healthz
 ```
 
-For more detail, see [docs/RUNBOOK.md](docs/RUNBOOK.md).
+### Common operational notes
+
+- **PC sleep / wake**: ~45 sec for Docker + Tailscale to handshake on wake. Users see a brief timeout; the agent's next request retries. If they complain, see the skill's "Wake-from-sleep recipe" for zero-click setup verification.
+- **Tailscale logged out**: re-auth in the tray. The relay keeps running on `127.0.0.1:9119` and is still reachable locally, but `<host>.tail.ts.net` won't resolve until Tailscale is back up.
+- **Container died**: `docker logs hermes-relay --tail 100` → likely a port collision or a stale `OPERATOR_TOKEN` in the env. Recreate the container with the same `OPERATOR_TOKEN` as `~/.hermes/profiles/collector/.operator-token` (see Stage 3e).
+- **Token rotation**: regenerate with `openssl rand -hex 32`, write to `relay/.operator-token-test`, restart the container with the new env, copy the new token to `~/.hermes/profiles/collector/.operator-token`, restart the operator CLI.
+
+For more detail, see [docs/RUNBOOK.md](docs/RUNBOOK.md) and the `hermes-distribution-packaging` skill → **Tailscale-as-PC-relay**.
 
 ---
 
@@ -323,23 +395,20 @@ Users who run `hermes update` get the new version. Security files (denylist, hoo
 | Task | Why I can't do it |
 |---|---|
 | Push to GitHub | Need your GitHub login |
-| Provision Oracle | Need your credit card + OCI login |
-| SSH into Oracle | Instance doesn't exist yet |
-| Create a GitHub PAT | Need your GitHub login |
+| `tailscale up` (authenticate) | Need your tailnet account |
+| Invite a user to your tailnet | Need to share a node from your account |
 | Build the macOS / Linux .dmg / .AppImage | I'm in a Windows terminal; cross-compile needs a Mac |
 
 Everything else (the code, the deploy script, the test verification, the docs) is done.
-
----
 
 ## Time check
 
 - Stage 0: 5 min (you)
 - Stage 1: 5 min (you: install gh, login, create repo)
-- Stage 2: 15-25 min (mostly waiting for Oracle)
-- Stage 3: 5 min (mostly automated)
+- Stage 2: 2 min (you: authenticate Tailscale)
+- Stage 3: 5 min (mostly automated: build + start container + propagate token)
 - Stage 4: 5 min (you: test the install)
 - Stage 5: 30 sec
-- **Total: 35-45 min for end-to-end ship**
+- **Total: ~20 min for end-to-end ship**
 
-After that, you're in maintenance mode (5 min/day for review).
+After that, you're in maintenance mode (5 min/day for review). No remote server to babysit — the relay lives on this box and wakes with it.

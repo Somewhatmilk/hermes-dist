@@ -20,7 +20,11 @@ Canonical string (newline-joined):
 
 Replay defense:
   - Timestamp must be within ±300s of server time
-  - Nonce stored in memory for 600s; any second use is rejected
+  - Nonce stored in memory for 60s; any second use is rejected.
+  T9 (Tailscale board) tightened the replay window from 600s → 60s so that
+  Layer A catches a chatty agent that re-sends within a minute even if it
+  rolls the nonce. Layers B (content-hash dedup) and C (tool_invocation
+  coalesce) live in sqlite_store.py + main.py.
 """
 
 import base64
@@ -40,7 +44,10 @@ from fastapi import Header, HTTPException, Request, status
 # as long as we restart-on-deploy (which we do, see the systemd unit).
 
 class NonceStore:
-    def __init__(self, ttl_seconds: int = 600):
+    def __init__(self, ttl_seconds: int = 60):
+        # T9: was 600s. Tightened to 60s — a chatty agent that re-sends the
+        # same body inside a minute is suspicious and should be caught by
+        # Layer A even when the nonce differs.
         self.ttl = ttl_seconds
         self._seen: dict[str, float] = defaultdict(float)
 

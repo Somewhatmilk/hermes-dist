@@ -11,20 +11,39 @@ This repo is what end users clone / `hermes update` from. It contains:
 ## TL;DR (for the operator — you)
 
 ```bash
-# 1. Local dry-test (no GitHub, no Oracle)
+# 1. Local dry-test (no GitHub, no remote server)
 cd ~/hermes-dist
-./relay/tests/dry-run.sh                  # builds the relay Docker, fires a signed test event
+./relay/tests/dry-run.sh                  # builds the relay Docker, fires a signed test event,
+                                          # writes the operator token to relay/.operator-token-test
 
 # 2. Ship to a public GitHub repo
 gh repo create you/hermes-dist --public --source=. --remote=origin --push
 # (or: git remote add origin git@github.com:you/hermes-dist.git && git push -u origin main)
 
-# 3. Deploy the relay to Oracle Cloud Always Free ARM
-./relay/deploy/deploy-oracle.sh <oracle-instance-public-ip>
+# 3. Bring Tailscale up on this PC (already installed at %LOCALAPPDATA%\Tailscale\)
+tailscale up                              # sign in via browser, accept the node
+tailscale ip -4                           # confirm 100.x.x.x + MagicDNS name
 
-# 4. Point a user install at the relay
-hermes install --from you/hermes-dist --relay https://relay.your-domain
+# 4. Deploy the relay to a local Docker container bound to 127.0.0.1:9119
+#    (reached by users over Tailscale at https://<host>.tail.ts.net:9119)
+cd ~/hermes-dist/relay
+docker build -t hermes-relay:latest .
+docker run -d --name hermes-relay --restart unless-stopped \
+  -p 127.0.0.1:9119:9119 \
+  -e OPERATOR_TOKEN="$(cat .operator-token-test)" \
+  -v hermes-relay-data:/var/lib/hermes-relay \
+  hermes-relay:latest
+
+# 5. Propagate the operator token to your operator profile
+mkdir -p ~/.hermes/profiles/collector
+cp .operator-token-test ~/.hermes/profiles/collector/.operator-token
+chmod 600 ~/.hermes/profiles/collector/.operator-token
+
+# 6. Point a user install at the relay
+hermes install --from you/hermes-dist --relay https://<host>.tail.ts.net:9119
 ```
+
+The relay runs on **this box**. No remote VPS, no public IP, no SSH bastion — Tailscale's WireGuard over DERP gives you a stable 100.x.x.x + `<host>.tail.ts.net` for free. When you eventually move to a NAS or VPS, you only flip the DNS name; users' `gateway_config.json` is unchanged. See the `hermes-distribution-packaging` skill → **Tailscale-as-PC-relay** and **Migration PC → NAS via DNS entrypoint**.
 
 ## What end users see
 
@@ -76,18 +95,21 @@ hermes-dist/
 │   └── scripts/
 │       └── uuidgen.sh                     portable UUIDv4 generator
 ├── install-windows.ps1                    PoC single-OS installer
-├── relay/                                 the FastAPI collector
+├── install-unix.sh                        Mac/Linux installer (mirror of install-windows.ps1)
+├── relay/                                 the FastAPI collector (runs locally on this PC)
 │   ├── app/
 │   │   ├── main.py
 │   │   ├── hmac_auth.py
 │   │   ├── sqlite_store.py
 │   │   └── models.py
-│   ├── deploy/
-│   │   ├── deploy-oracle.sh
-│   │   ├── relay.service                  systemd unit
-│   │   └── daily-ping.sh                  Oracle-reclamation-defense
+│   ├── deploy/                             historical — see SHIP.md for the current Tailscale flow
+│   │   ├── deploy-oracle.sh                (Oracle Always Free ARM deploy — superseded)
+│   │   ├── relay.service                   systemd unit
+│   │   ├── relay-ping.timer                systemd timer
+│   │   └── daily-ping.sh                   (Oracle reclamation defense — no longer needed)
 │   ├── tests/
-│   │   ├── dry-run.sh
+│   │   ├── dry-run.sh                      builds the Docker image and runs the 4-case test suite;
+│   │   │                                   also writes the operator token to .operator-token-test
 │   │   └── fire-test-event.sh
 │   ├── Dockerfile
 │   └── requirements.txt
@@ -96,6 +118,12 @@ hermes-dist/
     ├── SECURITY.md
     └── RUNBOOK.md
 ```
+
+The `relay/deploy/deploy-oracle.sh` script is kept for reference (in case the operator
+later wants to provision a cloud VM) but the supported ship path is the
+Tailscale-on-this-PC flow described in [SHIP.md](SHIP.md) Stage 2-3. Tailscale
+gives a stable `<host>.tail.ts.net` and WireGuard encryption without exposing
+the operator's ISP IP; the relay stays on this box, bound to 127.0.0.1.
 
 ## License
 
