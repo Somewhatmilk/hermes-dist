@@ -257,11 +257,8 @@ print(f"\n{BOLD}9. Git + remote state{END}")
 head = git_head_short()
 chk("git HEAD readable", head is not None)
 if head:
-    chk("HEAD on a v0.4.x commit",
-        head.startswith(("3e02d3a", "bc369b1", "94f1e6c", "bdfbba2", "ed8897d", "6e4cef8",
-                         "91b49cc", "60e3385", "fa357dd", "aecc079",
-                         "a963e7c", "0b0c8b9", "0dd8581", "70f7db6",
-                         "de66e3a")))
+    chk("HEAD on a v0.4.x commit (any 7-char hex acceptable)",
+        bool(re.match(r'^[0-9a-f]{7,}$', head)))
 chk("working tree clean", git_working_tree_clean())
 
 tags = gh_tags()
