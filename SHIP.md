@@ -53,6 +53,20 @@ DEFERRED for future v0.4.6+ (after trimming to ≤15 KB):
 
 NO new auto-load skills (4 auto-load unchanged). System-prompt cost still ~104 KB. Total opt-in surface: 18 skills (~510 KB), up from 14 in v0.4.3.
 
+**v0.4.6-subagent-resume (this commit):** ships `subagent-with-resume.py` — a resumable subagent dispatch wrapper that solves the "subagent gets blocked/dropped/503/rate-limited and loses all in-flight state" failure mode (user canon 2026-07-10). Pattern: deterministic subagent UUID from `hash(goal + context_digest)` so retries use the SAME scratchpad namespace; subagent writes progress checkpoints to `mnemosyne_scratchpad_write("subagent/<uid>/...", ...)` before each expensive tool call; if subagent fails (timeout, non-zero rc, rate-limit), the wrapper re-dispatches with prior scratchpad state injected into context; up to N retries. Also ships the `subagent-resumability` opt-in skill documenting the pattern + the discipline (sparse scratchpad writes, "before risky call checkpoint FIRST", "approaching budget write final-state"). No new auto-load skill (system-prompt cost stays at ~104 KB). Total opt-in: 19 skills (~520 KB).
+
+The pattern generalizes to kanban workers (`kanban-<task-id>` namespace) and profile-routed agents (`profile-<profile>-<session-id>` namespace) — the discipline (exact-state checkpoints before expensive ops) is the same; only the UID scheme differs. README-level usage:
+
+```
+python3 ~/.hermes/scripts/subagent-with-resume.py \
+  --goal "Research X" \
+  --context "background context" \
+  --max-retries 5 \
+  --timeout-s 900
+```
+
+Logs every attempt to `~/.hermes/logs/subagent-resume.log`. Cost: ~250 tokens overhead per subagent run (~5 scratchpad writes × 50 tokens each). Savings on retry: full subagent re-run avoided.
+
 **Verified-live state (2026-07-11, this commit):**
 - Relay at v0.2.2 (commit `3ca9857`) with v0.3.0 installer updates (commit `b2c8a86`)
 - `--workers 1` (PoC, in-process nonce store)
