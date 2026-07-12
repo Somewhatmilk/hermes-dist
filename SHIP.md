@@ -143,6 +143,32 @@ order silently is too high without operator sign-off.
 NO new auto-load skills. System-prompt cost still ~104 KB. Total
 opt-in: 20 SKILL.md files (4 auto + 20 opt-in), ~537 KB.
 
+
+
+**v0.4.10-aux-fallback-fix (commit `bdfbba2`):** ships
+`scripts/aux-fallback-fix.py` — config-gated runtime monkey-patch
+that adds step 3 (built-in discovery chain) to the EXPLICIT-provider
+fallback path. Default OFF preserves historical behavior. Opt-in via
+`auxiliary.<task>.allow_discovery_fallback: true`.
+
+ALSO VERIFIED: the v0.4.6 subagent-with-resume.py failure-recovery
+path. Killed PID 31868 at +8s, scratchpad goal entry survived, re-run
+with same UID returned "(resuming — prior progress found in
+scratchpad)". The previously-unproven claim is now evidence-backed.
+
+**v0.4.11-smoke-consolidation (commit `94f1e6c`):** ships 3 smoke
+scripts implementing the user-canonical pattern:
+- `smoke-leaf.py` — `smoke-leaf-{n}` session, 5 canonical queries
+- `smoke-kanban.py` — synthetic `smoke-kanban-{ts}-{rand}` task, 3 queries
+- `smoke-profile.py` — per-profile session, 3 queries × 8 profiles
+
+REPLACES the per-verifier `reply with exactly X` decoration pattern
+that spawned 13 hermes chat sessions across v0.4.6 → v0.4.10 (all
+deleted via `hermes sessions delete` before this commit).
+
+NEW canonical verifier: `verification/hermes-verify-v0411.py`
+(schema + git + scratchpad queries only; no hermes chat spawns).
+
 **Verified-live state (2026-07-11, this commit):**
 - Relay at v0.2.2 (commit `3ca9857`) with v0.3.0 installer updates (commit `b2c8a86`)
 - `--workers 1` (PoC, in-process nonce store)
