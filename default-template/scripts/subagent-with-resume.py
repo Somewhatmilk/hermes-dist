@@ -1,13 +1,28 @@
 #!/usr/bin/env python3
 """
-subagent-with-resume.py — Resumable subagent dispatch with scratchpad carry-over.
+subagent-with-resume.py — Resumable subagent-ish session dispatch with scratchpad carry-over.
+
+HONEST SCOPE: This is NOT a true subagent dispatcher. The hermes-agent
+runtime exposes `delegate_task` as an IN-SESSION tool only (callable by
+the agent within its own tool budget); there is no `hermes delegate`
+CLI subcommand. From a CLI script, the equivalent is `hermes chat
+--source <tag> -q "<goal>"` which spawns a fresh chat session, not a
+sub-process. We capture the session_id from the spawned chat and
+resume via `hermes chat --resume <session_id> -q "<continue>"`.
+
+This script therefore implements "resumable chat session with
+scratchpad carry-over", which has the same resumability properties
+as a subagent would (deterministic session_id, scratchpad state
+preserved across attempts, automatic retry on failure) but uses
+the chat surface rather than the in-session delegate_task tool.
 
 Pattern (per user canon 2026-07-10 + 2026-07-12):
-  1. Generate deterministic subagent UUID from hash(goal + context_digest)
-  2. Spawn subagent with scratchpad-write instructions in the goal
-  3. If subagent gets killed/blocked/timeout, READ prior scratchpad state
-  4. Re-dispatch with prior state as additional context
-  5. Loop up to N retries with the SAME UUID (same scratchpad namespace)
+  1. Generate deterministic session_id from hash(goal + context_digest)
+  2. Spawn `hermes chat --source subagent-<uid>` with the goal + scratchpad protocol
+  3. If subagent fails (timeout, non-zero rc), READ prior scratchpad state
+  4. Re-spawn with `--resume <session_id>` (continues the prior session) +
+     inject prior scratchpad state as additional context
+  5. Loop up to N retries with the SAME session_id (same scratchpad namespace)
 
 Usage:
   python3 subagent-with-resume.py --goal "Research X" --context "..."
@@ -51,15 +66,21 @@ def read_scratchpad(uid: str) -> str:
 
 
 def dispatch_subagent(goal: str, context: str, uid: str,
-                       prior_state: str, timeout_s: int) -> tuple[bool, str]:
-    """Spawn subagent with scratchpad instructions + prior state in context."""
-    full_context = f"""{context}
+                       prior_state: str, timeout_s: int,
+                       attempt: int) -> tuple[bool, str, str]:
+    """Spawn or resume hermes chat session with scratchpad protocol.
+
+    Returns (success, output, session_id_or_empty).
+    On attempt=1: spawn fresh chat, capture session_id from stdout.
+    On attempt>1: --resume that session_id with prior scratchpad state.
+    """
+    full_goal = f"""{goal}
 
 ---
 
-## Resumable subagent protocol
+## Resumable session protocol (attempt {attempt})
 
-You are subagent `{uid}`. Your scratchpad namespace is `mnemosyne_scratchpad_*`.
+You are session `{uid}`. Your scratchpad namespace is `mnemosyne_scratchpad_*`.
 
 **SCRATCHPAD WRITE PROTOCOL** (mandatory):
 
@@ -74,10 +95,10 @@ You are subagent `{uid}`. Your scratchpad namespace is `mnemosyne_scratchpad_*`.
 3. **Every 5 tool calls**: write a checkpoint:
    ```
    mnemosyne_scratchpad_write("{uid}/checkpoint-<count>",
-     "completed: <list>; remaining: <list>; key state: <exact IDs/paths>")
+     "completed: <list>; remaining: <list>; key_state: <exact IDs/paths>")
    ```
 
-4. **Approaching your tool-call budget** (within 3 of max_iterations=80):
+4. **Approaching your tool-call budget** (within 3 of max-turns=40):
    ```
    mnemosyne_scratchpad_write("{uid}/final-state",
      "goal: <the original task>, completed: <exact list>, remaining: <exact list>,
@@ -87,40 +108,57 @@ You are subagent `{uid}`. Your scratchpad namespace is `mnemosyne_scratchpad_*`.
 5. **Before any tool call that might fail** (rate-limited API, network, server-down):
    checkpoint FIRST so the next retry has your prior progress even if this call kills you.
 
-**WHEN YOUR PARENT RE-DISPATCHES YOU** (because your prior run got killed/blocked):
+---
 
-Read the prior state below to understand where you left off. Pick up from `resume_from` — do NOT redo work.
+## Background context
+
+{context}
 
 ---
 
 ## Prior state from previous attempt
 
 {prior_state}
-
----
-
-Now execute the goal below. Use the scratchpad protocol throughout.
-
-## Goal
-
-{goal}
 """
+    args = ["hermes", "chat",
+            "-Q",                              # quiet mode for programmatic use
+            "--accept-hooks",                   # skip interactive hook prompts
+            "--checkpoints",                    # filesystem checkpoints for safety
+            "--max-turns", "40",                 # per-attempt budget
+            "--source", uid,                    # tags session with our deterministic id
+            "--pass-session-id",                # emit session_id at end for capture
+            "-q", full_goal]
+
+    # If we have a session_id from a prior attempt, use --resume to continue it
+    if hasattr(dispatch_subagent, "_session_id") and dispatch_subagent._session_id:
+        args.extend(["--resume", dispatch_subagent._session_id])
+
     try:
-        proc = subprocess.run(
-            ["hermes", "delegate",
-             "--goal", goal,
-             "--context", full_context,
-             "--max-iterations", "80",
-             "--timeout", str(timeout_s)],
-            capture_output=True, text=True, timeout=timeout_s + 30,
-        )
+        proc = subprocess.run(args, capture_output=True, text=True, timeout=timeout_s)
         if proc.returncode == 0:
-            return True, proc.stdout
-        return False, f"hermes delegate failed: rc={proc.returncode}, stderr={proc.stderr.strip()[:200]}"
+            sid = ""
+            # Try to extract session id from the last "session ... id ..." line
+            for line in proc.stdout.splitlines()[::-1]:
+                line = line.strip()
+                if line and "session" in line.lower():
+                    import re
+                    m = re.search(r"[a-f0-9]{8,}", line)
+                    if m:
+                        sid = m.group(0)
+                        break
+            if not sid:
+                import re
+                m = re.search(r"[a-f0-9]{16,}", proc.stdout)
+                if m:
+                    sid = m.group(0)
+            if sid:
+                dispatch_subagent._session_id = sid
+            return True, proc.stdout, sid
+        return False, f"hermes chat failed: rc={proc.returncode}, stderr={proc.stderr.strip()[:200]}", ""
     except subprocess.TimeoutExpired:
-        return False, f"subagent timed out after {timeout_s}s (likely killed by parent timeout)"
+        return False, f"chat session timed out after {timeout_s}s (likely killed)", ""
     except FileNotFoundError:
-        return False, "`hermes` CLI not found on PATH — install hermes-agent first"
+        return False, "`hermes` CLI not found on PATH — install hermes-agent first", ""
 
 
 def log_resume_attempt(uid: str, attempt: int, max_retries: int,
@@ -170,14 +208,16 @@ def main() -> int:
             prior_state = read_scratchpad(uid)
             print(f"[subagent] re-read scratchpad: {len(prior_state)} bytes")
 
-        success, output = dispatch_subagent(
-            args.goal, args.context, uid, prior_state, args.timeout_s
+        success, output, sid = dispatch_subagent(
+            args.goal, args.context, uid, prior_state, args.timeout_s, attempt
         )
         log_resume_attempt(uid, attempt, args.max_retries, success,
                             "" if success else output)
 
         if success:
             print(f"\n[subagent] SUCCESS on attempt {attempt}")
+            if sid:
+                print(f"[subagent] session_id: {sid}  (use 'hermes chat --resume {sid}' to continue later)")
             print(f"[subagent] output (first 500 chars):")
             print(output[:500])
             print(f"\n[subagent] full log: ~/.hermes/logs/subagent-resume.log")
