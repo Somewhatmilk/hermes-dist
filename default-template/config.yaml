@@ -152,6 +152,7 @@ skills_auto_load:
 #   diagnose-root-cause               (5 KB)  - opt-in (NEW v0.4.1)
 #   socratic-prompting                (6 KB)  - opt-in (NEW v0.4.1)
 #   cross-session-todo-handoff        (10 KB) - opt-in (NEW v0.4.2)
+#   mnemosyne-tuning                   (9 KB)  - opt-in (NEW v0.4.3)
 #
-# Total opt-in surface: 13 skills, ~440 KB. None of these are loaded
+# Total opt-in surface: 14 skills, ~450 KB. None of these are loaded
 # unless the user explicitly runs `hermes skills install <name>`.

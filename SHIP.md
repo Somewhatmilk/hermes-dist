@@ -22,6 +22,8 @@ The relay runs on **this PC** (the operator's box) and is reached over **Tailsca
 
 **v0.4.2 (this commit):** added `cross-session-todo-handoff` opt-in skill (10 KB) — addresses the "I run multiple parallel sessions and the next session doesn't know what the previous one was doing" failure mode. Pattern: write a `work.in_progress` canonical Mnemosyne slot + a high-importance dated `mnemosyne_remember` at session end; read both at session start. Designed to be sleep-resistant (importance ≥0.85 + `valid_until` ~1 month).
 
+**v0.4.3 (this commit):** added `mnemosyne-tuning` opt-in skill (9 KB) — addresses the secondary failure mode where Mnemosyne recall drops high-importance recent facts in favor of mid-importance older facts. Pattern: per-call recall_weights (vec=0.4, fts=0.3, importance=0.3) instead of (0.5, 0.3, 0.2); env-var overrides for persistence; always combine high-importance + valid_until when writing handoffs. Also added a 5-line "session-start handoff ritual" section to the auto-load `routing` skill so the cross-session todo read happens automatically. Skill v1.1.0 corrects v1.0.0 speculation (Mnemosyne's recall_weights are env-var-or-per-call only, NOT in `~/.hermes/config.yaml` schema; `pinned=1` is the actual "do not consolidate" flag but isn't exposed via the wrapper).
+
 **Verified-live state (2026-07-11, this commit):**
 - Relay at v0.2.2 (commit `3ca9857`) with v0.3.0 installer updates (commit `b2c8a86`)
 - `--workers 1` (PoC, in-process nonce store)
