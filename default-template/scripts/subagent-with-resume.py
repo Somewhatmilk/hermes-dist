@@ -48,21 +48,80 @@ def deterministic_id(goal: str, context: str) -> str:
     return f"{SCRATCHPAD_NS}-{digest}"
 
 
+SCRATCHPAD_DB = (Path.home() / ".hermes" / "mnemosyne" / "data"
+                  / "mnemosyne.db")
+
+
+def _scratchpad_query(uid_prefix: str) -> list[dict]:
+    """Read all scratchpad rows whose content starts with `uid_prefix`.
+
+    The scratchpad is a flat table: id, content, session_id, created_at,
+    updated_at. NOT a key-value store. Agents address entries by putting
+    a key prefix in the content itself (e.g. 'subagent-<uid>/goal: ...').
+    """
+    try:
+        import sqlite3
+        if not SCRATCHPAD_DB.exists():
+            return []
+        conn = sqlite3.connect(str(SCRATCHPAD_DB))
+        cur = conn.cursor()
+        # Match either an exact-prefix match or a 'uid/sub_key' prefix in content
+        cur.execute(
+            "SELECT id, content, updated_at FROM scratchpad "
+            "WHERE content LIKE ? OR content LIKE ? "
+            "ORDER BY updated_at DESC",
+            (f"{uid_prefix}%", f"{uid_prefix}/%"),
+        )
+        rows = cur.fetchall()
+        conn.close()
+        return [
+            {"id": r[0], "content": r[1], "updated_at": r[2]}
+            for r in rows
+        ]
+    except Exception as e:
+        sys.stderr.write(f"[warn] scratchpad query failed: {e}\n")
+        return []
+
+
+def _scratchpad_write(uid: str, sub_key: str, content: str) -> bool:
+    """Write a scratchpad entry with content prefixed by `uid/sub_key: ...`."""
+    try:
+        import sqlite3, uuid
+        if not SCRATCHPAD_DB.parent.exists():
+            SCRATCHPAD_DB.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(SCRATCHPAD_DB))
+        cur = conn.cursor()
+        entry_id = uuid.uuid4().hex[:16]
+        full_content = f"{uid}/{sub_key}: {content}"
+        cur.execute(
+            "INSERT INTO scratchpad (id, content, session_id) VALUES (?, ?, ?)",
+            (entry_id, full_content, "subagent-resume"),
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        sys.stderr.write(f"[warn] scratchpad write failed: {e}\n")
+        return False
+
+
 def read_scratchpad(uid: str) -> str:
-    """Read prior progress + final-state from scratchpad (via hermes CLI)."""
+    """Read prior progress + final-state for this uid from the scratchpad DB.
+
+    Addresses scratchpad entries by content-prefix (the actual scratchpad
+    design: single-row table, agents tag entries via content prefix).
+    """
+    rows = _scratchpad_query(uid)
+    if not rows:
+        return "(no prior state)"
     parts = []
-    for sub_key in ["goal", "progress", "final-state"]:
-        full_key = f"{uid}/{sub_key}"
-        try:
-            out = subprocess.run(
-                ["hermes", "mnemosyne", "scratchpad", "read", "--key", full_key],
-                capture_output=True, text=True, timeout=15,
-            )
-            if out.returncode == 0 and out.stdout.strip():
-                parts.append(f"### {sub_key}\n{out.stdout.strip()}\n")
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
-    return "\n".join(parts) if parts else "(no prior state)"
+    for r in rows[:10]:  # cap to last 10 entries to avoid context blow-up
+        # Strip the "uid/sub_key: " prefix for display
+        content = r["content"]
+        if content.startswith(f"{uid}/"):
+            content = content[len(uid) + 1:]
+        parts.append(f"### {r['updated_at']}\n{content}\n")
+    return "\n".join(parts)
 
 
 def dispatch_subagent(goal: str, context: str, uid: str,
@@ -193,6 +252,14 @@ def main() -> int:
     print(f"[subagent] goal: {args.goal[:120]}{'...' if len(args.goal) > 120 else ''}")
     print()
 
+    # Write the goal to scratchpad on the very first run, so a future retry
+    # that finds no in-flight subagent still has a "goal" entry to read.
+    # Idempotent: only writes if no prior entry exists for this uid.
+    prior_check = _scratchpad_query(uid)
+    if not prior_check:
+        _scratchpad_write(uid, "goal", f"goal={args.goal!r} context={args.context[:200]!r}")
+        print(f"[subagent] wrote initial goal to scratchpad")
+
     prior_state = read_scratchpad(uid)
     print(f"[subagent] prior scratchpad state: {len(prior_state)} bytes")
     if "(no prior state)" in prior_state:
@@ -215,6 +282,10 @@ def main() -> int:
                             "" if success else output)
 
         if success:
+            # Write the final output to scratchpad as final-state, so a future
+            # retry can read it and know "the prior run completed with X".
+            _scratchpad_write(uid, "final-state",
+                              f"output={output[:500]!r} session_id={sid}")
             print(f"\n[subagent] SUCCESS on attempt {attempt}")
             if sid:
                 print(f"[subagent] session_id: {sid}  (use 'hermes chat --resume {sid}' to continue later)")
@@ -223,6 +294,10 @@ def main() -> int:
             print(f"\n[subagent] full log: ~/.hermes/logs/subagent-resume.log")
             return 0
 
+        # Failure: write a checkpoint to scratchpad so a retry can pick up.
+        # The "in-flight" entry is the agent's hint that it was active.
+        _scratchpad_write(uid, f"attempt-{attempt}-fail",
+                          f"err={output[:200]!r}")
         print(f"[subagent] attempt {attempt} failed: {output[:200]}")
         if attempt < args.max_retries:
             print(f"[subagent] sleeping 5s before retry...")
