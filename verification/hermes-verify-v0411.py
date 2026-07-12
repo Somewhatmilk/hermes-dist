@@ -257,8 +257,8 @@ print(f"\n{BOLD}9. Git + remote state{END}")
 head = git_head_short()
 chk("git HEAD readable", head is not None)
 if head:
-    chk("HEAD on a v0.4.x commit (10 or 94 or bdfbba2 or ed8897d)",
-        head.startswith(("94f1e6c", "bdfbba2", "ed8897d", "6e4cef8",
+    chk("HEAD on a v0.4.x commit",
+        head.startswith(("bc369b1", "94f1e6c", "bdfbba2", "ed8897d", "6e4cef8",
                          "91b49cc", "60e3385", "fa357dd", "aecc079",
                          "a963e7c", "0b0c8b9", "0dd8581", "70f7db6",
                          "de66e3a")))
