@@ -158,10 +158,12 @@ skills_auto_load:
 #   addon-protocol                     (13 KB) - opt-in (NEW v0.4.5)
 #   information-validation             (25 KB) - opt-in (NEW v0.4.5)
 #   subagent-resumability              (8 KB)  - opt-in (NEW v0.4.6)
+#   kanban-worker-resumability          (6 KB)  - opt-in (NEW v0.4.9, kanban-namespace variant)
+#   profile-agent-resumability          (8 KB)  - opt-in (NEW v0.4.9, profile-namespace variant)
 #   deep-research-methodology          (15 KB) - opt-in (NEW v0.4.8, trimmed from 38 KB)
 #   verify-before-claim-hardware        (16 KB) - opt-in (NEW v0.4.8, trimmed from 40 KB)
 #
-# Total opt-in: 12 NEW entries (per-version). Plus 8 pre-existing skills
+# Total opt-in: 14 NEW entries (per-version). Plus 8 pre-existing skills
 # shipped in v0.3.0 that remain in the catalog = 20 opt-in total.
 # See default-template/SKILLS.md for the full index of all 25 SKILL.md files
 # (4 auto-load + 20 opt-in + 1 in references/, though the SKILL.md count includes

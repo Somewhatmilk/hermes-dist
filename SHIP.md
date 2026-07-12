@@ -114,6 +114,35 @@ user relying on the current behavior breaks; recommend a config-gated
 fix once user confirms. Documented here for the v0.4.8 commit but
 NO code change shipped.
 
+
+**v0.4.9-subagent-namespace-variants (this commit):** two new opt-in skills
+that extend the v0.4.6 subagent-resumability discipline to the kanban
+and profile-routed surfaces. Per the v0.4.6 canon: "the discipline is
+the same, only the UID scheme differs." So no new wrapper scripts —
+the v0.4.6 `subagent-with-resume.py` works as-is, you just supply a
+different `--uid`.
+
+NEW opt-in skills:
+- `kanban-worker-resumability` (6 KB, `meta/`) — UID scheme:
+  `kanban-<task-id>`. Complements the existing kanban DB layer with
+  in-session exact-state checkpoints.
+- `profile-agent-resumability` (8 KB, `meta/`) — UID scheme:
+  `profile-<profile-name>-<session-id>`. Complements the routing
+  auto-load skill with per-profile-session scratchpad checkpoints.
+
+ISSUE FILED (not in dist repo; at `~/.hermes/issues/`):
+The auxiliary client fallback order in
+`hermes-agent/agent/auxiliary_client.py:6908-6935` has a
+comment/code inconsistency — the comment documents 4 fallback steps
+but the EXPLICIT path skips step 3. Documented for upstream review
+at `~/.hermes/issues/2026-07-12-aux-fallback-order.md`. My
+recommendation: treat the code as correct (Interpretation B), fix the
+comment. **No code change shipped** — the risk of changing fallback
+order silently is too high without operator sign-off.
+
+NO new auto-load skills. System-prompt cost still ~104 KB. Total
+opt-in: 20 SKILL.md files (4 auto + 20 opt-in), ~537 KB.
+
 **Verified-live state (2026-07-11, this commit):**
 - Relay at v0.2.2 (commit `3ca9857`) with v0.3.0 installer updates (commit `b2c8a86`)
 - `--workers 1` (PoC, in-process nonce store)
