@@ -8,7 +8,17 @@ The relay runs on **this PC** (the operator's box) and is reached over **Tailsca
 
 **v0.3.0 update (this commit):** cross-OS installers (Linux/macOS/Windows), per-OS path detection, Tailscale CGNAT 100.x.x.x denied in security/denylist.yaml, push-update heartbeat (`POST /api/v1/profile-bundle` + 60s client poll), profile-bundle replaces operator-pull on every config change.
 
-**v0.4.0 design (this commit):** heartbeat replaced with **user-initiated `hermes update-dist`** (no auto-apply). On hermes launch / daily scheduled task, the installer checks `https://api.github.com/repos/Somewhatmilk/hermes-dist/releases/latest`. If newer than `~/.hermes/profiles/<uuid>/.hermes-dist-version`, a toast prompts the user: *"hermes-dist v0.3.1 available. Run `hermes update-dist` to review and apply."* User runs `hermes update-dist` to see the diff and approve. Skills shipped in `default-template/skills/` (10 universal skills based on operator-side usage analysis), 4 auto-load (`failures-journal`, `routing`, `cartographer-prompt-gate`, `mnemosyne-memory` = ~104 KB system-prompt cost), 6 opt-in.
+**v0.4.0 design:** heartbeat replaced with **user-initiated `hermes update-dist`** (no auto-apply). On hermes launch / daily scheduled task, the installer checks `https://api.github.com/repos/Somewhatmilk/hermes-dist/releases/latest`. If newer than `~/.hermes/profiles/<uuid>/.hermes-dist-version`, a toast prompts the user: *"hermes-dist v0.3.1 available. Run `hermes update-dist` to review and apply."* User runs `hermes update-dist` to see the diff and approve.
+
+**v0.4.1-skills (this commit):** extended the opt-in skill catalog. **0 new auto-load skills** (system-prompt cost stays at ~104 KB), **6 new opt-in skills** (~152 KB additional surface, only loads when user explicitly opts in):
+- `web-interaction` (12 KB, SKILL.md only — references pulled on demand) — web scraping/automation patterns
+- `background-process-lifecycle` (36 KB) — daemon/watcher lifecycle, session_id discipline, notify-vs-watch decision
+- `cross-platform-bash-scripting` (84 KB) — OSTYPE-aware bash, cron/launchd/systemd/Task-Scheduler dispatch, MSYS path-bridge
+- `prompt-direction-format-examples` (6 KB, NEW) — the 5-step prompt ladder
+- `diagnose-root-cause` (5 KB, NEW) — patch the cause, not the symptom
+- `socratic-prompting` (6 KB, NEW) — 3-questions pattern for strategic work
+
+**Skill total:** 4 auto-load + 12 opt-in = 16 universal skills (~540 KB opt-in surface, 0 KB additional system-prompt cost vs v0.4.0). mnemosyne-memory bumped from 33 KB → 36 KB with a new "Mental Model" section at the top (read-first before the API surface).
 
 **Verified-live state (2026-07-11, this commit):**
 - Relay at v0.2.2 (commit `3ca9857`) with v0.3.0 installer updates (commit `b2c8a86`)

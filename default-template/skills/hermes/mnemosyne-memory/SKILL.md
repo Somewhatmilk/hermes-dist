@@ -15,6 +15,50 @@ metadata:
 
 # Mnemosyne Memory
 
+> ## Mental Model (read this first)
+>
+> Mnemosyne is **not a database** in the sense you query with `SELECT * FROM`.
+> It is a **note-passing inbox + relevance scorer**. Five things make this
+> distinction load-bearing:
+>
+> 1. **Recall returns *relevant*, not *correct*.** `mnemosyne_recall` ranks
+>    memories by importance + recency + similarity. Top-N wins, not "the
+>    answer". You still verify the recalled fact against the source before
+>    citing it (see `references/verify-before-cite.md`).
+> 2. **The four surfaces are NOT interchangeable.**
+>    - `mnemosyne_remember` → working memory (importance × veracity, used
+>      by recall)
+>    - `mnemosyne_remember_canonical` → identity slots (one value per
+>      `(category, name)`, supersedes cleanly — for stable "I am X" facts)
+>    - `mnemosyne_triple_add` / `_query` → subject-predicate-object graph
+>      (for relational facts; traversable via `mnemosyne_graph_*`)
+>    - `mnemosyne_scratchpad_*` → ephemeral working notes (session-only,
+>      NOT in recall ranking)
+>    - `mnemosyne_shared_*` → cross-agent surface (compact, stable meta
+>      only — never raw conversation)
+> 3. **Memory *layers*, not *types*.** A fact can exist in working (live
+>    recall), episodic (consolidated summaries), BEAM tiers (compressed
+>    further for hot/cold paths), and graph (relational). You don't
+>    pick a layer — the `sleep` cycle moves things between them.
+> 4. **Importance + recency + similarity = ranking, not authority.** A
+>    high-importance but stale fact will surface; a low-importance but
+>    current fact won't. If you need the *authoritative* version, use
+>    `mnemosyne_recall_canonical` (returns the single slot value), not
+>    `mnemosyne_recall` (returns ranked candidates).
+> 5. **It's the agent's notebook, not the user's.** Mnemosyne is what
+>    the *agent* recalls next session. For the *user's* browsing
+>    surface, see Obsidian (different home, different consumer).
+>    See "Memory architecture" below for the 3-way split.
+>
+> When in doubt: "would I want the agent to recall this next session
+> without being told?" → yes → Mnemosyne. "Would I want to look this
+> up myself tomorrow?" → yes → Obsidian. "Is it 20KB+ project
+> deliverable?" → yes → `Documents/hermes-research/`.
+>
+> The rest of this skill is the API surface, the recall discipline, the
+> dreaming cron, and the gotchas. Read the mental model; skim the rest
+> on demand.
+
 Mnemosyne is Hermes's native memory backend (SQLite + sqlite-vec + FTS5, polyphonic recall, Bayesian veracity consolidation). The companion `mnemosyne-hermes` package wires it as a first-class `MemoryProvider`.
 
 **Two surfaces, one DB (NEW 2026-07-07).** This skill previously conflated "Mnemosyne the library" with "Mnemosyne the Hermes wrapper" and got caught. The distinction is load-bearing:

@@ -136,7 +136,7 @@ skills_auto_load:
   - failures-journal                # 7 KB  - error patterns + recovery
   - routing                          # 32 KB - profile dispatch (always-loaded)
   - cartographer-prompt-gate         # 32 KB - lean prompts before write
-  - mnemosyne-memory                 # 33 KB - memory provider wiring
+  - mnemosyne-memory                 # 36 KB - memory provider wiring + mental model (v2.10.1)
 
 # Skills shipped in default-template/skills/ but NOT auto-loaded:
 #   security                          (15 KB) - opt-in via `hermes skills install security`
@@ -145,3 +145,12 @@ skills_auto_load:
 #   mnemosyne-curator                 (37 KB) - opt-in
 #   hermes-skill-loading-disciplines  (68 KB) - opt-in
 #   hermes-misbehavior-diagnosis      (29 KB) - opt-in
+#   web-interaction                   (12 KB, SKILL.md only) - opt-in
+#   background-process-lifecycle      (36 KB) - opt-in
+#   cross-platform-bash-scripting     (84 KB) - opt-in
+#   prompt-direction-format-examples  (6 KB)  - opt-in (NEW v0.4.1)
+#   diagnose-root-cause               (5 KB)  - opt-in (NEW v0.4.1)
+#   socratic-prompting                (6 KB)  - opt-in (NEW v0.4.1)
+#
+# Total opt-in surface: 12 skills, ~430 KB. None of these are loaded
+# unless the user explicitly runs `hermes skills install <name>`.
