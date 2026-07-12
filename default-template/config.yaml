@@ -153,6 +153,12 @@ skills_auto_load:
 #   socratic-prompting                (6 KB)  - opt-in (NEW v0.4.1)
 #   cross-session-todo-handoff        (10 KB) - opt-in (NEW v0.4.2)
 #   mnemosyne-tuning                   (9 KB)  - opt-in (NEW v0.4.3)
+#   prompt-interview-pattern           (10 KB) - opt-in (NEW v0.4.5)
+#   session-continuity-advisor         (14 KB) - opt-in (NEW v0.4.5)
+#   addon-protocol                     (13 KB) - opt-in (NEW v0.4.5)
+#   information-validation             (25 KB) - opt-in (NEW v0.4.5)
+# + hermes-misbehavior-diagnosis/references/error-classification.md (9 KB extracted from hermes-llm-preflight)
+# + skill-library-consolidator/references/refactor-procedure.md     (7 KB extracted from hermes-skill-refactor)
 #
-# Total opt-in surface: 14 skills, ~450 KB. None of these are loaded
+# Total opt-in surface: 18 skills, ~510 KB. None of these are loaded
 # unless the user explicitly runs `hermes skills install <name>`.

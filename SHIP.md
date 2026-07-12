@@ -33,6 +33,26 @@ python3 ~/.hermes/scripts/hermes-changelog.py --list   # recent changes
 
 The script's Mnemosyne write tries the high-level wrapper first, falls back to direct SQLite INSERT to `working_memory` table (schema-verified). Other agents with `shared_surface_read: true` will see these writes in their next recall — this is the practical cross-session "synced brain" mechanism. v0.4.4 also ships a `kanban-changelog-reader.md` template at `default-template/templates/kanban-changelog-reader.md` so users can run a kanban worker that mirrors Mnemosyne writes back to Obsidian on a schedule (optional, opt-in).
 
+**v0.4.5-skill-union (this commit):** 4 new opt-in skills promoted from the "other agent's" parallel-session work, + 2 universal-section extracts into existing shipped skills. All promoted after a triage report (`~/.hermes/sessions/2026-07-12-skill-triage-report.md`) that audited 20 of the other agent's recent skills against the universal-vs-operator boundary.
+
+NEW opt-in skills:
+- `prompt-interview-pattern` (10 KB, `productivity/`) — interview the user before writing, one question at a time. Complements shipped `socratic-prompting` (which is teaching; this is scope clarification).
+- `session-continuity-advisor` (14 KB, `hermes/`) — when to /new, when to reload context, when to query prior sessions. Pairs with shipped `cross-session-todo-handoff` (decides WHAT carries across; this decides WHEN to switch).
+- `addon-protocol` (13 KB, `meta/`) — threat-tiered sandbox + 7-step ADDON procedure. Pairs with shipped `skill-library-consolidator` (which surveys what exists; this governs the ACT of adding).
+- `information-validation` (25 KB, `research/`) — cross-reference methodology, the `success: true` ≠ evidence discipline, the proactive-research-before-claiming rule. Highest-priority universal shipping — closes the "agent cited plausible-but-wrong number" failure mode.
+
+MERGED into existing shipped skills (no new top-level skill, extracted universal sections only):
+- `hermes-misbehavior-diagnosis/references/error-classification.md` (9 KB) — extracted "Pre-flight procedure + Error classification table + Pitfalls" from `hermes-llm-preflight`. The "classify error before retry" pattern extends misbehavior-diagnosis. The full `hermes-llm-preflight` (38 KB, operator-specific WSL2 / kanban / ollama sections) stays local.
+- `skill-library-consolidator/references/refactor-procedure.md` (7 KB) — extracted "The Refactor Procedure" from `hermes-skill-refactor`. The 7-step procedure + 11-pitfall catalog is genuinely additive. The full `hermes-skill-refactor` (30 KB, operator-specific verification patterns) stays local.
+
+KEPT LOCAL-ONLY (operator-specific, no shipping): `hermes-dispatch-gate`, `hermes-kanban-architecture`, `task-deferral-pattern`, `kanban-worker-lifecycle`, `camofox-persistent-browser`, `hermes-config-cli-gotchas`, `hermes-distribution-packaging`, `web-research-stack-2026-07-12`, `reddit-canon-sweep`, `hermes-llm-preflight`, `hermes-skill-refactor`, `self-contained-spa-html`. Reason: most reference operator-specific paths, joandrew.com.sg workflow, or local Docker stack (camofox :9377, SearXNG :8888, firecrawl :3002, crawl4ai, browser-use) that other users won't have.
+
+DEFERRED for future v0.4.6+ (after trimming to ≤15 KB):
+- `deep-research-methodology` (38 KB) — universal 5-layer framework but with domain-specific examples (kbd/Steam); trim before shipping
+- `verify-before-claim-hardware` (40 KB) — universal "verify before claiming" rule but with hardware-specific recipes (nvidia-smi, etc.); trim before shipping
+
+NO new auto-load skills (4 auto-load unchanged). System-prompt cost still ~104 KB. Total opt-in surface: 18 skills (~510 KB), up from 14 in v0.4.3.
+
 **Verified-live state (2026-07-11, this commit):**
 - Relay at v0.2.2 (commit `3ca9857`) with v0.3.0 installer updates (commit `b2c8a86`)
 - `--workers 1` (PoC, in-process nonce store)
