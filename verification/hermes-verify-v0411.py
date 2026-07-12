@@ -258,7 +258,7 @@ head = git_head_short()
 chk("git HEAD readable", head is not None)
 if head:
     chk("HEAD on a v0.4.x commit",
-        head.startswith(("bc369b1", "94f1e6c", "bdfbba2", "ed8897d", "6e4cef8",
+        head.startswith(("3e02d3a", "bc369b1", "94f1e6c", "bdfbba2", "ed8897d", "6e4cef8",
                          "91b49cc", "60e3385", "fa357dd", "aecc079",
                          "a963e7c", "0b0c8b9", "0dd8581", "70f7db6",
                          "de66e3a")))
