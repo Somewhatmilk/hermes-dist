@@ -24,6 +24,15 @@ The relay runs on **this PC** (the operator's box) and is reached over **Tailsca
 
 **v0.4.3 (this commit):** added `mnemosyne-tuning` opt-in skill (9 KB) — addresses the secondary failure mode where Mnemosyne recall drops high-importance recent facts in favor of mid-importance older facts. Pattern: per-call recall_weights (vec=0.4, fts=0.3, importance=0.3) instead of (0.5, 0.3, 0.2); env-var overrides for persistence; always combine high-importance + valid_until when writing handoffs. Also added a 5-line "session-start handoff ritual" section to the auto-load `routing` skill so the cross-session todo read happens automatically. Skill v1.1.0 corrects v1.0.0 speculation (Mnemosyne's recall_weights are env-var-or-per-call only, NOT in `~/.hermes/config.yaml` schema; `pinned=1` is the actual "do not consolidate" flag but isn't exposed via the wrapper).
 
+**v0.4.4-cross-session (this commit):** ships `hermes-changelog.py` — a cross-session change-log writer that mirrors every logged change to BOTH (a) the user's Obsidian vault at `~/Desktop/Obsidian Vault/Hermes Engine/changes/<ISO>-<slug>.md` for human browsing and (b) the Mnemosyne shared-surface DB at `~/.hermes/mnemosyne/data/shared/mnemosyne.db` for agent recall. The shared-surface write was previously blocked because `shared_surface_read: false` by default; this commit also enables that flag in `~/.hermes/config.yaml` (operator-side, not in the dist repo). Usage:
+
+```
+python3 ~/.hermes/scripts/hermes-changelog.py --kind skill-shipped --slug my-skill --summary "..." --details "..."
+python3 ~/.hermes/scripts/hermes-changelog.py --list   # recent changes
+```
+
+The script's Mnemosyne write tries the high-level wrapper first, falls back to direct SQLite INSERT to `working_memory` table (schema-verified). Other agents with `shared_surface_read: true` will see these writes in their next recall — this is the practical cross-session "synced brain" mechanism. v0.4.4 also ships a `kanban-changelog-reader.md` template at `default-template/templates/kanban-changelog-reader.md` so users can run a kanban worker that mirrors Mnemosyne writes back to Obsidian on a schedule (optional, opt-in).
+
 **Verified-live state (2026-07-11, this commit):**
 - Relay at v0.2.2 (commit `3ca9857`) with v0.3.0 installer updates (commit `b2c8a86`)
 - `--workers 1` (PoC, in-process nonce store)
