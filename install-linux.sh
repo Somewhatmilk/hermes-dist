@@ -10,13 +10,14 @@
 #
 # What this does:
 #   1. Verifies prerequisites (python3, git, curl)
-#   2. Detects package manager (apt / dnf / pacman / zypper) and ensures git+python3+curl
+#   2. Detects package manager (apt / dnf / pacman / zypper) and ensures git+python3+curl + libnotify-bin (for toast)
 #   3. Sets HERMES_HOME=$HOME/.hermes  and  WORKING_DIR=$HOME
 #   4. Installs Hermes Agent via the official installer (curl | bash)
 #   5. Clones the hermes-dist repo into $HOME/hermes-dist (or uses existing)
 #   6. Runs .onboard.sh from the cloned repo
 #   7. Sets up a systemd USER timer for the daily update check (no sudo required)
-#   8. Starts a 60-second heartbeat (systemd user service, oneshot, looping)
+#      — runs scripts/hermes-dist-update.sh which does git pull + GitHub releases
+#        API check + notify-send toast (per v0.4.0 design; user-initiated apply)
 #
 # Environment overrides:
 #   HERMES_HOME         default: $HOME/.hermes
@@ -24,7 +25,6 @@
 #   HERMES_DIST_REPO    git URL of the hermes-dist bundle (otherwise expects local clone)
 #   HERMES_RELAY_URL    default: https://relay.local
 #   HERMES_BIN          default: $HERMES_HOME/venv/bin/hermes
-#   SKIP_HEARTBEAT=1    skip starting the heartbeat loop (dry-run friendly)
 #   SKIP_SCHEDULER=1    skip registering systemd timer
 #
 # Verified on: Ubuntu 22.04+, Debian 12+, Fedora 39+, Arch (current), openSUSE Leap 15+
@@ -123,12 +123,14 @@ ensure_pkg() {
     esac
 }
 
-# Only enforce git/python3/curl — they're declared prereqs above; if the user
-# ran us as root or with sudo, fix missing ones silently. Most users will have
-# these already.
-ensure_pkg git     git     || true
-ensure_pkg curl    curl    || true
-ensure_pkg python3 python3 || true
+# Only enforce git/python3/curl/notify-send — they're declared prereqs above;
+# if the user ran us as root or with sudo, fix missing ones silently.
+# notify-send = libnotify-bin (Debian/Ubuntu) / libnotify (Fedora/Arch).
+# Without it the toast silently degrades to stderr-only.
+ensure_pkg git           git            || true
+ensure_pkg curl          curl           || true
+ensure_pkg python3       python3        || true
+ensure_pkg notify-send   libnotify-bin  || true   # toast surface (best-effort)
 
 # ─── 4. Install Hermes Agent via official installer ────────────────────────
 if ! command -v hermes >/dev/null 2>&1 && [ ! -x "$HERMES_BIN" ]; then
@@ -171,7 +173,12 @@ echo "Running .onboard.sh ..."
         bash "$ONBOARD"
 )
 
-# ─── 7. Register systemd USER timer for daily update check ─────────────────
+# ─── 7. Register systemd USER timer for daily update check (v0.4.0 design) ──
+# Per the v0.4.0 design (commit de66e3a): the timer runs the daily update-check
+# script which does git pull + GitHub releases API check + toast. The user runs
+# `hermes update-dist` to actually apply the update (no auto-apply, no
+# auto-download).
+#
 # User-scoped (no sudo) so the timer runs only while the user is logged in.
 # Pattern from skill cross-platform-bash-scripting §4d (linux branch).
 SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
@@ -179,17 +186,28 @@ mkdir -p "$SYSTEMD_USER_DIR"
 
 UPDATE_SERVICE="hermes-dist-update.service"
 UPDATE_TIMER="hermes-dist-update.timer"
-HEARTBEAT_SERVICE="hermes-dist-heartbeat.service"
+UPDATE_SCRIPT_SRC="$DIST_DIR/scripts/hermes-dist-update.sh"
+
+# Copy the update script into a stable location the systemd unit references.
+# systemd can't reliably follow relative paths or run scripts in $DIST_DIR if
+# the repo gets moved/renamed, so we copy once at install time.
+UPDATE_SCRIPT_DST="$HOME/.local/bin/hermes-dist-update.sh"
+mkdir -p "$(dirname "$UPDATE_SCRIPT_DST")"
+cp "$UPDATE_SCRIPT_SRC" "$UPDATE_SCRIPT_DST"
+chmod +x "$UPDATE_SCRIPT_DST"
 
 cat > "$SYSTEMD_USER_DIR/$UPDATE_SERVICE" <<SVC_EOF
 [Unit]
-Description=Hermes Dist — daily git pull (update check)
+Description=Hermes Dist — daily update check (v0.4.0)
 After=network-online.target
 
 [Service]
 Type=oneshot
 WorkingDirectory=$DIST_DIR
-ExecStart=/usr/bin/env bash -c 'cd "$DIST_DIR" && git pull --ff-only 2>&1 | head -20 || true'
+Environment=HERMES_DIST_DIR=$DIST_DIR
+Environment=HERMES_DIST_REPO=$HERMES_DIST_REPO
+Environment=HERMES_PIN_FILE=$DIST_DIR/.hermes-dist-version
+ExecStart=/usr/bin/env bash $UPDATE_SCRIPT_DST
 SVC_EOF
 
 cat > "$SYSTEMD_USER_DIR/$UPDATE_TIMER" <<TMR_EOF
@@ -199,25 +217,16 @@ Description=Hermes Dist daily update check at 09:00
 [Timer]
 OnCalendar=*-*-* 09:00:00
 Persistent=true
+RandomizedDelaySec=300
 
 [Install]
 WantedBy=timers.target
 TMR_EOF
 
-# Heartbeat = 60s poll loop, expressed as a systemd user service with
-# Restart=always and a 60s ExecStartPre sleep. This is the canonical
-# "looped oneshot" pattern; systemd re-fires after exit.
-cat > "$SYSTEMD_USER_DIR/$HEARTBEAT_SERVICE" <<HB_EOF
-[Unit]
-Description=Hermes Dist heartbeat (60s poll)
-After=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/env bash -c 'sleep 60 && "$HERMES_BIN" heartbeat --relay "$HERMES_RELAY_URL" || true'
-Restart=always
-RestartSec=60
-HB_EOF
+# Pin the current tag so the next run has a baseline to compare against.
+# Pulls from git describe; falls back to "v0.0.0" if repo is bare / no tags.
+CURRENT_TAG="$(cd "$DIST_DIR" && git describe --tags --abbrev=0 2>/dev/null || echo 'v0.0.0')"
+echo "$CURRENT_TAG" > "$DIST_DIR/.hermes-dist-version"
 
 # Reload user systemd and enable (don't start — user session may not be active
 # during install; the .service for the timer will run on next login).
@@ -226,27 +235,13 @@ if [ "${SKIP_SCHEDULER:-0}" = "1" ]; then
     echo "  ⚠ SKIP_SCHEDULER=1 — not registering systemd timer"
 else
     systemctl --user daemon-reload
-    systemctl --user enable --now "$UPDATE_TIMER" || \
+    systemctl --user enable --now "$UPDATE_TIMER" 2>/dev/null || \
         echo "  ⚠ Failed to enable $UPDATE_TIMER (user session not active — will retry on next login)"
-    echo "  ✓ Registered systemd user timer: $UPDATE_TIMER"
+    echo "  ✓ Registered systemd user timer: $UPDATE_TIMER (daily 09:00, ±5min jitter)"
+    echo "  ✓ Pinned current version: $CURRENT_TAG"
 fi
 
-# ─── 8. Start heartbeat ─────────────────────────────────────────────────────
-if [ "${SKIP_HEARTBEAT:-0}" = "1" ]; then
-    echo "  ⚠ SKIP_HEARTBEAT=1 — not starting heartbeat"
-else
-    # Best-effort start of the heartbeat. The user systemd instance must be
-    # active for this to succeed; if not, the service will start on next login
-    # thanks to the .service file we just wrote. We do NOT block on this.
-    if systemctl --user start "$HEARTBEAT_SERVICE" 2>/dev/null; then
-        echo "  ✓ Heartbeat started (60s poll)"
-    else
-        echo "  ⚠ Heartbeat service installed but not started (user systemd not active now)."
-        echo "    It will start automatically on your next login. Logs: journalctl --user -u $HEARTBEAT_SERVICE"
-    fi
-fi
-
-# ─── 9. Final summary ──────────────────────────────────────────────────────
+# ─── 8. Final summary ───────────────────────────────────────────────────────
 echo
 echo "=== Installation Complete (Linux) ==="
 echo "  HERMES_HOME:   $HERMES_HOME"
@@ -254,6 +249,8 @@ echo "  WORKING_DIR:   $WORKING_DIR"
 echo "  Dist bundle:   $DIST_DIR"
 echo "  Relay URL:     $HERMES_RELAY_URL"
 echo "  Scheduler:     systemd user timer ($UPDATE_TIMER)"
-echo "  Heartbeat:     $HEARTBEAT_SERVICE (60s)"
+echo "  Update check:  systemd user timer ($UPDATE_TIMER), daily 09:00 ±5min jitter"
+echo "  Update script: $UPDATE_SCRIPT_DST"
+echo "  Toast:         notify-send (libnotify)"
 echo
 echo "Launch with: hermes chat"

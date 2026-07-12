@@ -129,7 +129,12 @@ echo "Running .onboard.sh ..."
         bash "$ONBOARD"
 )
 
-# ─── 7. launchd plist: daily update check at 09:00 ─────────────────────────
+# ─── 7. launchd plist: daily update check at 09:00 (v0.4.0 design) ───────
+# Per the v0.4.0 design (commit de66e3a): the launchd plist runs the daily
+# update-check script which does git pull + GitHub releases API check +
+# macOS Notification Center toast. The user runs `hermes update-dist` to
+# actually apply the update (no auto-apply, no auto-download).
+#
 # Pattern from skill cross-platform-bash-scripting §4d (darwin branch).
 # Plists live under ~/Library/LaunchAgents/ and load via `launchctl load -w`.
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
@@ -139,8 +144,15 @@ mkdir -p "$LOGS_DIR"
 
 UPDATE_LABEL="com.user.hermes-dist-update"
 UPDATE_PLIST="$LAUNCH_AGENTS_DIR/${UPDATE_LABEL}.plist"
-HEARTBEAT_LABEL="com.user.hermes-dist-heartbeat"
-HEARTBEAT_PLIST="$LAUNCH_AGENTS_DIR/${HEARTBEAT_LABEL}.plist"
+UPDATE_SCRIPT_SRC="$DIST_DIR/scripts/hermes-dist-update.sh"
+
+# Copy the update script into a stable location launchd references. launchd
+# can't reliably follow relative paths or run scripts in $DIST_DIR if the
+# repo gets moved/renamed, so we copy once at install time.
+UPDATE_SCRIPT_DST="$HOME/.local/bin/hermes-dist-update.sh"
+mkdir -p "$(dirname "$UPDATE_SCRIPT_DST")"
+cp "$UPDATE_SCRIPT_SRC" "$UPDATE_SCRIPT_DST"
+chmod +x "$UPDATE_SCRIPT_DST"
 
 # Helper to unregister a stale plist before re-registering (mac update case).
 unregister_plist() {
@@ -150,6 +162,8 @@ unregister_plist() {
     fi
 }
 
+# v0.4.0: plist runs the shared update script. macOS toast comes from inside
+# the script via `osascript -e 'display notification ...'`.
 write_update_plist() {
     cat > "$UPDATE_PLIST" <<PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -160,9 +174,14 @@ write_update_plist() {
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>-c</string>
-        <string>cd '${DIST_DIR}' &amp;&amp; git pull --ff-only 2&gt;&amp;1 | head -20</string>
+        <string>${UPDATE_SCRIPT_DST}</string>
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HERMES_DIST_DIR</key><string>${DIST_DIR}</string>
+        <key>HERMES_DIST_REPO</key><string>${HERMES_DIST_REPO}</string>
+        <key>HERMES_PIN_FILE</key><string>${DIST_DIR}/.hermes-dist-version</string>
+    </dict>
     <key>WorkingDirectory</key><string>${DIST_DIR}</string>
     <key>StartCalendarInterval</key>
     <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
@@ -174,28 +193,10 @@ write_update_plist() {
 PLIST_EOF
 }
 
-write_heartbeat_plist() {
-    cat > "$HEARTBEAT_PLIST" <<PLIST_EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key><string>${HEARTBEAT_LABEL}</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>${HERMES_BIN}</string>
-        <string>heartbeat</string>
-        <string>--relay</string>
-        <string>${HERMES_RELAY_URL}</string>
-    </array>
-    <key>StartInterval</key><integer>60</integer>
-    <key>StandardOutPath</key><string>${LOGS_DIR}/heartbeat.log</string>
-    <key>StandardErrorPath</key><string>${LOGS_DIR}/heartbeat.err</string>
-    <key>RunAtLoad</key><true/>
-</dict>
-</plist>
-PLIST_EOF
-}
+# Pin the current tag so the next run has a baseline to compare against.
+# Falls back to "v0.0.0" if repo has no tags yet.
+CURRENT_TAG="$(cd "$DIST_DIR" && git describe --tags --abbrev=0 2>/dev/null || echo 'v0.0.0')"
+echo "$CURRENT_TAG" > "$DIST_DIR/.hermes-dist-version"
 
 if [ "${SKIP_SCHEDULER:-0}" = "1" ]; then
     echo
@@ -206,25 +207,11 @@ else
     # Validate the plist before loading — launchctl's plist parse error is unhelpful.
     if plutil -lint "$UPDATE_PLIST" >/dev/null 2>&1; then
         launchctl load -w "$UPDATE_PLIST"
-        echo "  ✓ Registered launchd plist: $UPDATE_PLIST"
+        echo "  ✓ Registered launchd plist: $UPDATE_PLIST (daily 09:00)"
+        echo "  ✓ Pinned current version: $CURRENT_TAG"
     else
         echo "  ✗ Failed to validate $UPDATE_PLIST (plist syntax error)" >&2
         plutil -lint "$UPDATE_PLIST" >&2 || true
-    fi
-fi
-
-# ─── 8. launchd heartbeat (60s poll) ───────────────────────────────────────
-if [ "${SKIP_HEARTBEAT:-0}" = "1" ]; then
-    echo "  ⚠ SKIP_HEARTBEAT=1 — not starting heartbeat"
-else
-    unregister_plist "$HEARTBEAT_LABEL" "$HEARTBEAT_PLIST"
-    write_heartbeat_plist
-    if plutil -lint "$HEARTBEAT_PLIST" >/dev/null 2>&1; then
-        launchctl load -w "$HEARTBEAT_PLIST"
-        echo "  ✓ Heartbeat started (60s poll, $HEARTBEAT_LABEL)"
-    else
-        echo "  ✗ Failed to validate $HEARTBEAT_PLIST (plist syntax error)" >&2
-        plutil -lint "$HEARTBEAT_PLIST" >&2 || true
     fi
 fi
 
@@ -235,8 +222,9 @@ echo "  HERMES_HOME:   $HERMES_HOME"
 echo "  WORKING_DIR:   $WORKING_DIR"
 echo "  Dist bundle:   $DIST_DIR"
 echo "  Relay URL:     $HERMES_RELAY_URL"
-echo "  Scheduler:     launchd plist ($UPDATE_PLIST)"
-echo "  Heartbeat:     launchd plist ($HEARTBEAT_PLIST, 60s StartInterval)"
+echo "  Update check:  launchd plist ($UPDATE_PLIST), daily 09:00"
+echo "  Update script: $UPDATE_SCRIPT_DST"
+echo "  Toast:         macOS Notification Center (osascript)"
 echo
 echo "Launch with: hermes chat"
 echo "Logs:        $LOGS_DIR"
