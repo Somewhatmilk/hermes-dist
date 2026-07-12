@@ -1,0 +1,44 @@
+# filesystem-mcp.yml — scoped filesystem access for agents
+#
+# The official @modelcontextprotocol/server-filesystem MCP server.
+# Gives agents read/write/list access to a SINGLE host directory.
+#
+# Bind mount: /opt/mcp/scratch (host) -> /workspace (container)
+# Port: 8082 (loopback) or 100.106.125.105:8082 (Tailscale)
+# Auth: MCP_API_KEY env var (generate with `openssl rand -hex 32`)
+#
+# IMPORTANT:
+# - DO NOT bind-mount /, /home, /root, or any directory with secrets
+# - The container runs as UID 1000 (non-root)
+# - Default API key is a placeholder — CHANGE IT before exposing
+
+services:
+  filesystem-mcp:
+    image: mcp/filesystem:latest
+    container_name: mcp-filesystem
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    ports:
+      # Loopback-only by default. Change to "100.106.125.105:8082:8082"
+      # to expose to Tailscale tailnet.
+      - "127.0.0.1:8082:8082"
+    environment:
+      - MCP_API_KEY=CHANGE_ME_BEFORE_DEPLOY
+      - MCP_ALLOWED_DIRS=/workspace
+    volumes:
+      # EDIT THIS: replace /opt/mcp/scratch with the actual directory
+      # you want agents to access. Read-only mount prevents the
+      # container from writing to the host even if the MCP is
+      # compromised.
+      - /opt/mcp/scratch:/workspace:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

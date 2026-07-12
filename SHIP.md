@@ -67,6 +67,53 @@ python3 ~/.hermes/scripts/subagent-with-resume.py \
 
 Logs every attempt to `~/.hermes/logs/subagent-resume.log`. Cost: ~250 tokens overhead per subagent run (~5 scratchpad writes × 50 tokens each). Savings on retry: full subagent re-run avoided.
 
+**v0.4.7-installers + v0.4.7-fix (commits `60e3385` + `91b49cc`):** bring
+Linux/macOS installers to v0.4.0/v0.4.1 parity with Windows (systemd user
+timer + launchd plist running the daily-update-check at 09:00, with
+notify-send / osascript toast on new tag). Then fix the
+subagent-with-resume scratchpad layer: `_scratchpad_write/query` now
+uses direct SQLite against the agent's real DB instead of shelling
+out to a non-existent CLI subcommand. End-to-end smoke verified: real
+`hermes chat` via wrapper returned `V047_VERIFIED` correctly; scratchpad
+state persisted across runs (772-word count of README.md confirmed
+correct against `wc -w`).
+
+**v0.4.8-trim+index+mcps (this commit):** four new artifacts.
+
+1. **Trimmed `deep-research-methodology`** from 38 KB → 15 KB. Kept
+   the 5-layer framework (breadth / depth / time / cross-validation /
+   meta) + 10 universal pitfalls. Removed operator-specific sections
+   (Morimens case, a11y virtualization, aesthetic recs).
+
+2. **Trimmed `verify-before-claim-hardware`** from 40 KB → 16 KB. Kept
+   the rule + the 5-step reflex + Windows diagnostic commands + the
+   12 universal anti-patterns. Removed operator-specific hardware
+   (ZOTAC, Acer PD, WDDM, mmproj, VideoOutputTechnology cheat-sheet).
+
+3. **`default-template/SKILLS.md`** — 10 KB index of all 25 SKILL.md
+   files in dist repo, grouped by auto-load vs opt-in, with
+   "indexes by purpose" (research work, hermes internals, shell
+   scripting, etc.). One-stop reference for which skills ship.
+
+4. **`default-template/mcps/`** — 3 starter compose-yamls (filesystem
+   MCP, browser-worker MCP, SearXNG) + readme.md explaining the
+   Tailscale-bind model, authentication, and update workflow.
+
+NO new auto-load skills. System-prompt cost still ~104 KB. Both
+trimmed skills ship as opt-in; users who need the operator-specific
+content can read the upstream versions at `~/.hermes/skills/...`.
+
+**Auxiliary client fallback chain observation (NOT a code change —
+flagging for review):** the EXPLICIT-provider fallback path in
+`hermes-agent/agent/auxiliary_client.py` calls `_try_main_agent_model_fallback`
+as step 2, but the canonical order (per the code comment) places
+"main agent model safety net" at step 4 — AFTER `_try_payment_fallback`
+which the EXPLICIT path skips entirely. This is a coverage gap, not
+an inversion per se. The risk of changing fallback order is that a
+user relying on the current behavior breaks; recommend a config-gated
+fix once user confirms. Documented here for the v0.4.8 commit but
+NO code change shipped.
+
 **Verified-live state (2026-07-11, this commit):**
 - Relay at v0.2.2 (commit `3ca9857`) with v0.3.0 installer updates (commit `b2c8a86`)
 - `--workers 1` (PoC, in-process nonce store)

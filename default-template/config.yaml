@@ -158,6 +158,12 @@ skills_auto_load:
 #   addon-protocol                     (13 KB) - opt-in (NEW v0.4.5)
 #   information-validation             (25 KB) - opt-in (NEW v0.4.5)
 #   subagent-resumability              (8 KB)  - opt-in (NEW v0.4.6)
+#   deep-research-methodology          (15 KB) - opt-in (NEW v0.4.8, trimmed from 38 KB)
+#   verify-before-claim-hardware        (16 KB) - opt-in (NEW v0.4.8, trimmed from 40 KB)
 #
-# Total opt-in surface: 19 skills, ~520 KB. None of these are loaded
-# unless the user explicitly runs `hermes skills install <name>`.
+# Total opt-in: 12 NEW entries (per-version). Plus 8 pre-existing skills
+# shipped in v0.3.0 that remain in the catalog = 20 opt-in total.
+# See default-template/SKILLS.md for the full index of all 25 SKILL.md files
+# (4 auto-load + 20 opt-in + 1 in references/, though the SKILL.md count includes
+# some from references/ — the actual user-facing set is 24 skills).
+# None of these are loaded unless the user explicitly runs `hermes skills install <name>`.

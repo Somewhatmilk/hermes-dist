@@ -1,0 +1,50 @@
+# browser-worker.yml — headless browser MCP for web research
+#
+# Generic Playwright-based headless browser exposed via MCP. Use for
+# tasks that need real browser interaction (clicking, JS rendering,
+# OAuth-gated sites).
+#
+# For a more battle-tested alternative, see camofox-browser (the
+# operator's preferred version), but camofox is operator-specific and
+# not shipped here.
+#
+# Port: 8083 (loopback) or Tailscale
+# Auth: MCP_API_KEY env var
+#
+# IMPORTANT:
+# - Headless browser = significant memory (Chromium ~500MB-2GB)
+# - Set shm_size: 2gb to avoid Chromium OOM
+# - For Tailscale exposure, bind to Tailscale IP NOT 0.0.0.0
+
+services:
+  browser-worker:
+    # Use a maintained Playwright MCP image. Check the registry for the
+    # current canonical image — this is a placeholder.
+    image: mcp/playwright:latest
+    container_name: mcp-browser-worker
+    restart: unless-stopped
+    shm_size: "2gb"  # Chromium needs shared memory
+    ports:
+      - "127.0.0.1:8083:8083"
+    environment:
+      - MCP_API_KEY=CHANGE_ME_BEFORE_DEPLOY
+      - BROWSER_HEADLESS=true
+      # Optional: route through a proxy if your network has egress rules
+      # - HTTP_PROXY=http://proxy.local:3128
+    volumes:
+      # Persist browser profile across container restarts. Without this,
+      # every restart loses cookies / cache / saved logins.
+      - mcp-browser-profile:/home/mcp/.cache/ms-playwright
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8083/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  mcp-browser-profile:
