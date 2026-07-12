@@ -18,7 +18,9 @@ The relay runs on **this PC** (the operator's box) and is reached over **Tailsca
 - `diagnose-root-cause` (5 KB, NEW) — patch the cause, not the symptom
 - `socratic-prompting` (6 KB, NEW) — 3-questions pattern for strategic work
 
-**Skill total:** 4 auto-load + 12 opt-in = 16 universal skills (~540 KB opt-in surface, 0 KB additional system-prompt cost vs v0.4.0). mnemosyne-memory bumped from 33 KB → 36 KB with a new "Mental Model" section at the top (read-first before the API surface).
+**Skill total:** 4 auto-load + 13 opt-in = 17 universal skills (~550 KB opt-in surface, 0 KB additional system-prompt cost vs v0.4.0). mnemosyne-memory bumped from 33 KB → 36 KB with a new "Mental Model" section at the top (read-first before the API surface).
+
+**v0.4.2 (this commit):** added `cross-session-todo-handoff` opt-in skill (10 KB) — addresses the "I run multiple parallel sessions and the next session doesn't know what the previous one was doing" failure mode. Pattern: write a `work.in_progress` canonical Mnemosyne slot + a high-importance dated `mnemosyne_remember` at session end; read both at session start. Designed to be sleep-resistant (importance ≥0.85 + `valid_until` ~1 month).
 
 **Verified-live state (2026-07-11, this commit):**
 - Relay at v0.2.2 (commit `3ca9857`) with v0.3.0 installer updates (commit `b2c8a86`)
