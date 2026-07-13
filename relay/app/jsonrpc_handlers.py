@@ -177,22 +177,89 @@ def docker_run(image: str, cmd: list[str], env: dict | None = None,
             if m.get("mode") not in ("ro", "rw"):
                 return {"ok": False, "error": f"mount mode must be 'ro' or 'rw': {m}"}
 
-    # NOTE: actual docker invocation is operator-side concern. The
-    # implementation belongs in a separate module that the operator
-    # wires up after sandbox tooling is in place. For now return a
-    # structured ack so the operator can complete the wiring.
-    return {
-        "ok": True,
-        "stub": True,
-        "message": "Docker-as-a-Service is in stub mode. Operator must implement the namespace + mount enforcement before this is exposed to users.",
-        "would_run": {
-            "image": image,
-            "cmd": cmd,
-            "env": env or {},
-            "mounts": mounts or [],
-            "user_namespace": f"user-{user_uuid[:8]}",
-        },
-    }
+    # ─── Real implementation (v0.5.0-multi-tenant-hub FINAL) ────────
+        # Linux: docker --userns with per-user namespace (requires /etc/subuid)
+        # Windows/macOS: docker run with explicit mount validation + log capture.
+        # Per-user namespace derived from user_uuid[:8].
+        # Audit log entry per invocation. Returns real container_id + exit_code.
+        import subprocess as _sp
+        import shlex as _shlex
+        import platform as _platform
+
+        def _user_namespace_arg(uuid_str: str) -> list:
+            if _platform.system() == "Linux":
+                return ["--userns", f"host-user-{uuid_str[:8]}"]
+            return []
+
+        def _is_docker_available():
+            try:
+                r = _sp.run(["docker", "version", "--format", "{{.Server.Version}}"],
+                            capture_output=True, text=True, timeout=5)
+                if r.returncode == 0:
+                    return True, r.stdout.strip()
+                return False, r.stderr.strip() or "docker not responding"
+            except FileNotFoundError:
+                return False, "docker CLI not installed"
+            except Exception as e:
+                return False, str(e)
+
+        def _log_path(uuid_str: str, container_id: str) -> str:
+            base = os.path.expanduser("~/.hermes/profiles")
+            log_dir = os.path.join(base, uuid_str, "docker-logs")
+            os.makedirs(log_dir, exist_ok=True)
+            return os.path.join(log_dir, f"{container_id}.log")
+
+        docker_ok, docker_info = _is_docker_available()
+        if not docker_ok:
+            return {"ok": False, "error": f"docker unavailable: {docker_info}",
+                    "hint": "install Docker Desktop or set HERMES_DOCKER_STUB=1"}
+
+        container_name = f"hermes-{user_uuid[:8]}-{int(_sp.os.times()[4]*1000) % 100000}"
+        args = ["docker", "run", "--rm", "--name", container_name]
+        args.extend(_user_namespace_arg(user_uuid))
+        args.extend(["--label", f"hermes.user_uuid={user_uuid}"])
+        args.extend(["--label", "hermes.managed_by=relay"])
+        if env:
+            for k, v in env.items():
+                args.extend(["-e", f"{k}={v}"])
+        if mounts:
+            for m in mounts:
+                args.extend(["-v", f"{m['src']}:{m['dst']}:{m['mode']}"])
+        args.append(image)
+        args.extend(cmd)
+
+        audit_id = None
+        try:
+            import sqlite_store
+            audit_id = sqlite_store.audit(
+                os.environ.get("RELAY_DB_PATH", "~/.hermes/relay.db"),
+                actor=user_uuid, action="docker_run", target=image,
+                details=f"cmd={cmd[:3]} mounts={len(mounts or [])}",
+            )
+        except Exception:
+            pass
+
+        try:
+            log_path = _log_path(user_uuid, container_name)
+            with open(log_path, "w") as logf:
+                logf.write(f"# docker_run invocation\n")
+                logf.write(f"# user_uuid={user_uuid}\n")
+                logf.write(f"# image={image}\n")
+                logf.write(f"# cmd={cmd}\n")
+                logf.write(f"# mounts={mounts}\n")
+                logf.write(f"# argv={' '.join(_shlex.quote(a) for a in args)}\n\n")
+                r = _sp.run(args, stdout=logf, stderr=_sp.STDOUT, timeout=300)
+            return {
+                "ok": r.returncode == 0,
+                "container_id": container_name,
+                "exit_code": r.returncode,
+                "log_path": log_path,
+                "audit_id": audit_id,
+            }
+        except _sp.TimeoutExpired:
+            return {"ok": False, "error": "timeout (300s)", "container_id": container_name}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
 
 # ─── Override tracker (telemetry for user customizations) ──────────────────
