@@ -134,3 +134,55 @@ class ProfileBundleListResponse(BaseModel):
     ok: bool
     count: int
     bundles: list[dict]
+
+
+# ─── T13: Multi-tenant hub JSON-RPC (v0.5.0) ─────────────────────────────
+
+class SkillListResponse(BaseModel):
+    """Body of GET /api/v1/skills."""
+    ok: bool
+    skills: list[dict] = Field(default_factory=list)
+    count: int
+
+
+class SkillReadResponse(BaseModel):
+    """Body of GET /api/v1/skills/<name>."""
+    ok: bool
+    name: Optional[str] = None
+    path: Optional[str] = None
+    content: Optional[str] = None
+    size_bytes: Optional[int] = None
+    error: Optional[str] = None
+
+
+class ToolInvokeRequest(BaseModel):
+    """Body of POST /api/v1/tools/invoke."""
+    tool: str = Field(..., min_length=1, max_length=128)
+    args: dict = Field(default_factory=dict)
+
+
+class ToolInvokeResponse(BaseModel):
+    """Body of POST /api/v1/tools/invoke response."""
+    ok: bool
+    tool: Optional[str] = None
+    output: Optional[Any] = None
+    scope_used: Optional[str] = None
+    audit_id: Optional[int] = None
+    error: Optional[str] = None
+
+
+class DockerRunRequest(BaseModel):
+    """Body of POST /api/v1/docker/run."""
+    image: str = Field(..., min_length=1, max_length=256)
+    cmd: list[str] = Field(..., min_length=1)
+    env: dict[str, str] = Field(default_factory=dict)
+    mounts: list[dict] = Field(default_factory=list)
+
+
+class DockerRunResponse(BaseModel):
+    """Body of POST /api/v1/docker/run response."""
+    ok: bool
+    stub: bool = False
+    message: Optional[str] = None
+    would_run: Optional[dict] = None
+    error: Optional[str] = None

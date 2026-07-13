@@ -121,6 +121,9 @@ from .models import (
 )
 from . import sqlite_store
 from .hmac_auth import verify_hmac_request, verify_hmac_get_request
+from .capability_token import verify_token as cap_verify_token, require_scope as cap_require_scope, DEFAULT_SCOPES
+from . import jsonrpc_handlers
+from . import capability_token
 
 
 log = logging.getLogger("relay")
@@ -254,6 +257,54 @@ def require_operator(x_operator_token: str = Header(..., min_length=64, max_leng
 
 
 # ─── Endpoints ─────────────────────────────────────────────────────────────
+
+def require_capability_token(
+    request: Request,
+    x_hermes_cap_token: str = Header(..., alias="X-Hermes-Cap-Token"),
+    verified: dict = Depends(verify_hmac_request),
+):
+    """Dual-auth dependency: HMAC (proves request is from a real user
+    install) + capability token (proves the user can do this action).
+
+    Returns the capability token payload on success.
+    Raises HTTPException 401 on auth failure, 403 on missing scope.
+    """
+    user_uuid = verified["user_uuid"]
+    # Load user's HMAC secret (the same secret used for the signature)
+    try:
+        user_secret = hmac_auth._load_user_secret(user_uuid)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="could not load user secret",
+        )
+    # Verify capability token
+    try:
+        payload = cap_verify_token(x_hermes_cap_token, user_uuid, user_secret)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"invalid capability token: {e}",
+        )
+    return payload
+
+
+def require_capability_scope(required_scope: str):
+    """Factory: returns a dependency that enforces HMAC + a specific capability scope."""
+    def dep(
+        cap_payload: dict = Depends(require_capability_token),
+    ):
+        try:
+            cap_require_scope(cap_payload, required_scope)
+        except PermissionError as e:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=str(e),
+            )
+        return cap_payload
+    return dep
+
+
 
 @app.get("/api/v1/healthz", response_model=HealthResponse)
 def healthz():
@@ -595,6 +646,88 @@ def list_profile_bundles(limit: int = 20):
     return ProfileBundleListResponse(ok=True, count=len(bundles), bundles=bundles)
 
 
+# ─── T13: Multi-tenant hub JSON-RPC (v0.5.0) ─────────────────────────────
+# These endpoints expose operator-owned resources (skills, tools, Docker)
+# to user installs under HMAC + capability-token auth. See
+# docs/decisions/0007-multi-tenant-hub.md for the full design.
+
+
+@app.get(
+    "/api/v1/skills",
+    response_model=SkillListResponse,
+    dependencies=[Depends(require_capability_scope("skills.list"))],
+)
+def list_skills_endpoint():
+    """List all available skills (read-only)."""
+    result = jsonrpc_handlers.list_skills()
+    return SkillListResponse(**result)
+
+
+@app.get(
+    "/api/v1/skills/{name}",
+    response_model=SkillReadResponse,
+    dependencies=[Depends(require_capability_scope("skills.read"))],
+)
+def read_skill_endpoint(name: str):
+    """Read one skill's full SKILL.md content."""
+    result = jsonrpc_handlers.read_skill(name)
+    return SkillReadResponse(**result)
+
+
+@app.post(
+    "/api/v1/tools/invoke",
+    response_model=ToolInvokeResponse,
+    dependencies=[Depends(require_capability_token)],
+)
+def invoke_tool_endpoint(req: ToolInvokeRequest, cap: dict = Depends(require_capability_token)):
+    """Invoke a registered tool with capability-token scope check + audit.
+
+    The specific tool's required scope is checked inside jsonrpc_handlers.
+    """
+    audit_path = os.environ.get("RELAY_DB_PATH", "~/.hermes/relay.db")
+    result = jsonrpc_handlers.invoke_tool(
+        name=req.tool,
+        args=req.args,
+        token_payload=cap,
+        audit_db_path=audit_path,
+    )
+    return ToolInvokeResponse(**result)
+
+
+@app.post(
+    "/api/v1/docker/run",
+    response_model=DockerRunResponse,
+    dependencies=[Depends(require_capability_scope("tools.docker_run"))],
+)
+def docker_run_endpoint(req: DockerRunRequest, request: Request):
+    """Submit a docker run request. Currently in stub mode (operator must
+    implement namespace + mount enforcement before exposing to users)."""
+    # Get user_uuid from request state (set by HMAC verification)
+    user_uuid = request.state.user_uuid if hasattr(request.state, "user_uuid") else "unknown"
+    result = jsonrpc_handlers.docker_run(
+        image=req.image,
+        cmd=req.cmd,
+        env=req.env,
+        mounts=req.mounts,
+        user_uuid=user_uuid,
+    )
+    return DockerRunResponse(**result)
+
+
+# ─── Override tracker (operator telemetry) ────────────────────────────────
+
+
+@app.get(
+    "/api/v1/overrides",
+    dependencies=[Depends(require_operator)],
+)
+def list_user_overrides(user_profile_dir: str, operator_default_dir: str):
+    """Operator endpoint: list files a user has customized vs operator default.
+    Telemetry signal — every override is product-usage data.
+    """
+    return jsonrpc_handlers.detect_overrides(user_profile_dir, operator_default_dir)
+
+
 # ─── Root ──────────────────────────────────────────────────────────────────
 
 @app.get("/")
@@ -614,5 +747,11 @@ def root():
             "POST /api/v1/profile-bundle (operator)",
             "GET  /api/v1/profile-bundle (HMAC, since=<unix_ts>)",
             "GET  /api/v1/profile-bundles (operator)",
+            # ─── T13: multi-tenant hub (v0.5.0) ───
+            "GET  /api/v1/skills (HMAC + skills.list)",
+            "GET  /api/v1/skills/<name> (HMAC + skills.read)",
+            "POST /api/v1/tools/invoke (HMAC + capability-token)",
+            "POST /api/v1/docker/run (HMAC + tools.docker_run)",
+            "GET  /api/v1/overrides (operator)",
         ],
     }
