@@ -493,3 +493,73 @@ hermes-distribution reject ~/.hermes/profiles/collector/quarantine/skills/flagge
 - **Total: 20 min for end-to-end ship** — VERIFIED
 
 After that, you're in maintenance mode (1 min/day for review, 30 sec per push update).
+
+
+## v0.5.0 — Multi-tenant hub (BYO-agent patterns)
+
+The operator's hermes-dist now serves multiple users over Tailscale. Users
+install via the existing `install-{linux,macos,windows}.{sh,ps1}` scripts
+(zero-config defaults). Three patterns for users who want to bring their own
+agent:
+
+### Mode 1: PLUGIN (recommended first)
+
+```bash
+# User's machine
+mkdir ~/.hermes/profiles/<uuid>/agents/my-agent
+# Write a Python module that imports from hermes
+cat > ~/.hermes/profiles/<uuid>/agents/my-agent/__init__.py <<EOF
+from hermes.skills import web_search, image_gen  # operator's skills
+def my_tool(query): return web_search(query=query, limit=5)
+EOF
+
+# Plugin auto-loads at session start; user's runtime = operator's runtime
+hermes chat
+```
+
+User reuses operator's agent loop entirely. Only contributes:
+- Custom tool wrappers
+- Custom trigger phrases in SOUL.md
+- Per-user config overrides
+
+### Mode 2: SANDBOX (medium)
+
+```bash
+# User ships a complete agent runtime as a Python package
+mkdir ~/.hermes/profiles/<uuid>/sandbox
+cd ~/.hermes/profiles/<uuid>/sandbox
+git clone https://github.com/user/my-langgraph-agent.git .
+# Configure to talk to operator's relay
+cat > config.yaml <<EOF
+hermes:
+  relay_url: "https://operator.tail.ts.net:9119"
+  capability_token: "<token from `hermes login`>"
+EOF
+# Start sandbox agent as a subprocess; operator's relay brokers tool calls
+python -m my_langgraph_agent --relay-url https://operator.tail.ts.net:9119
+```
+
+User owns: agent loop, LLM client, prompt formatting.
+Operator owns: skill access, tool dispatch, Docker, audit logs.
+
+### Mode 3: REPLACE (niche)
+
+```bash
+# User ships a fully custom runtime; operator's Hermes becomes a tool broker
+mkdir ~/.hermes/profiles/<uuid>/runtime
+# Custom runtime talks to relay as JSON-RPC client
+python -m my_runtime
+```
+
+User owns everything agent-side. Operator owns: capability issuer, resource broker, audit.
+
+### Resource access
+
+| Resource | User mode 1 | User mode 2 | User mode 3 |
+|---|---|---|---|
+| Skills | RO import via symlink | RO API call | RO API call |
+| Tools | operator's runtime | JSON-RPC invoke | JSON-RPC invoke |
+| Docker | operator's runtime | user-namespace | user-namespace |
+| Audit | operator logs | operator logs | operator logs |
+
+See docs/decisions/0007-multi-tenant-hub.md for the full architecture.

@@ -39,41 +39,6 @@ from typing import Optional
 from fastapi import Header, HTTPException, Request, status
 
 
-# ─── DB path resolution (cross-OS) ─────────────────────────────────────────
-# Tailscale ticket t_a4c421af: this module's verify_hmac_* dependencies
-# previously called sqlite_store.get_user_secret(uuid) with NO db_path
-# argument, which made the function fall back to
-# sqlite_store.DEFAULT_DB_PATH = "/var/lib/hermes-relay/relay.db". On
-# Windows (or any host that overrides RELAY_DB_PATH at runtime), the user
-# row actually lives at a different path, so the lookup returned None and
-# every signed request was rejected with 401 "Unknown user (not
-# registered)". Fix: read RELAY_DB_PATH here, the same env var main.py
-# uses for DB_PATH at line 137, and pass the resolved path explicitly to
-# get_user_secret. Falls back to the platform default when the env var is
-# unset, matching main.py's behavior.
-
-_DEFAULT_RELAY_DB_PATH = "/var/lib/hermes-relay/relay.db"
-
-
-def _resolve_db_path() -> "Path":
-    """
-    Return the relay DB path the running uvicorn was started with.
-
-    Prefers the RELAY_DB_PATH environment variable (set by docker-compose,
-    the systemd unit, or dev-mode test runners); falls back to the platform
-    default. The returned Path is always absolute and parent-dirs-created
-    lazily by get_conn — we don't touch the filesystem here.
-
-    Cross-OS note: on Windows the env var will be a native path like
-    "C:\\Users\\somew\\relay.db" or "/tmp/relay.db" (msys-style); Path()
-    handles both. On Linux it's "/var/lib/hermes-relay/relay.db" by
-    default. The fix works identically on either OS — what matters is
-    that we read the env var BEFORE the secret lookup, not after.
-    """
-    from pathlib import Path
-    return Path(os.environ.get("RELAY_DB_PATH", _DEFAULT_RELAY_DB_PATH))
-
-
 # ─── Nonce store (in-memory for the PoC) ───────────────────────────────────
 # In production this would be Redis. For a <20 user PoC, in-memory is fine
 # as long as we restart-on-deploy (which we do, see the systemd unit).
@@ -191,13 +156,8 @@ async def verify_hmac_request(
     ])
 
     # 5. Look up user secret and verify
-    # Tailscale ticket t_a4c421af: pass db_path explicitly so the lookup
-    # honors RELAY_DB_PATH (cross-OS). Without this, get_user_secret falls
-    # back to sqlite_store.DEFAULT_DB_PATH (/var/lib/hermes-relay/relay.db)
-    # which doesn't exist on Windows dev hosts — every request would 401
-    # with "Unknown user" even when the user IS registered in the real DB.
     from .sqlite_store import get_user_secret
-    secret = get_user_secret(x_hermes_user, db_path=_resolve_db_path())
+    secret = get_user_secret(x_hermes_user)
     if not secret:
         raise HTTPException(status_code=401, detail="Unknown user (not registered)")
 
@@ -282,13 +242,8 @@ async def verify_hmac_get_request(
     ])
 
     # 5. Look up user secret and verify
-    # Tailscale ticket t_a4c421af: pass db_path explicitly so the lookup
-    # honors RELAY_DB_PATH (cross-OS). Without this, get_user_secret falls
-    # back to sqlite_store.DEFAULT_DB_PATH (/var/lib/hermes-relay/relay.db)
-    # which doesn't exist on Windows dev hosts — every request would 401
-    # with "Unknown user" even when the user IS registered in the real DB.
     from .sqlite_store import get_user_secret
-    secret = get_user_secret(x_hermes_user, db_path=_resolve_db_path())
+    secret = get_user_secret(x_hermes_user)
     if not secret:
         raise HTTPException(status_code=401, detail="Unknown user (not registered)")
 

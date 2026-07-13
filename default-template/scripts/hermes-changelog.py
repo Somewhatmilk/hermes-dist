@@ -3,7 +3,7 @@
 hermes-changelog.py — Cross-session change-log tool.
 
 Writes a timestamped markdown entry to:
-  1. ~/Desktop/Obsidian Vault/Hermes Engine/changes/<ISO>-<slug>.md
+  1. ~/Desktop/Obsidian Vault/Cross-Session/changes/<ISO>-<slug>.md
      (human-browsable audit log)
   2. ~/.hermes/mnemosyne/data/shared/mnemosyne.db via mnemosyne_shared_remember
      (cross-session recall)
@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 
 VAULT = Path(os.environ.get("OBSIDIAN_VAULT") or
              (Path.home() / "Desktop" / "Obsidian Vault"))
-CHANGES_DIR = VAULT / "Hermes Engine" / "changes"
+CHANGES_DIR = VAULT / "Cross-Session" / "changes"
 MNEMOSYNE_SHARED_DB = (Path.home() / ".hermes" / "mnemosyne" / "data"
                        / "shared" / "mnemosyne.db")
 
@@ -62,7 +62,7 @@ timestamp: {iso}
 
 ---
 *Logged by hermes-changelog.py. View all changes:*
-`Hermes Engine/changes/*.md`
+`Cross-Session/changes/*.md`
 """
     path.write_text(body, encoding="utf-8")
     return path

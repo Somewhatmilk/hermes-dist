@@ -5,7 +5,7 @@
 Writes a timestamped entry to **two surfaces** at once:
 
 1. **Obsidian vault** (human-browsable audit log):
-   `~/Desktop/Obsidian Vault/Hermes Engine/changes/<ISO-timestamp>-<slug>.md`
+   ~/Desktop/Obsidian Vault/Cross-Session/changes/<ISO>-<slug>.md
 
 2. **Mnemosyne shared surface** (agent-readable cross-session sync):
    `~/.hermes/mnemosyne/data/shared/mnemosyne.db` (via `working_memory` INSERT,
